@@ -30,7 +30,7 @@ def _load_dataset_safe(dataset_name: str, split: str = "train", config: str | No
         label = f"{dataset_name}" + (f" ({config})" if config else "")
         logger.info(f"Loading dataset: {label} (split={split})...")
         ds = load_dataset(dataset_name, config, split=split, **kwargs)
-        # Remove audio columns to avoid torchcodec/FFmpeg issues (per CLAUDE.md)
+        # Remove audio columns to avoid torchcodec/FFmpeg decode errors
         audio_cols = [c for c in ds.column_names if c in ("audio", "Audio", "speech")]
         if audio_cols:
             ds = ds.remove_columns(audio_cols)
