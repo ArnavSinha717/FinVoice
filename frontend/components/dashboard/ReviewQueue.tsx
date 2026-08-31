@@ -33,9 +33,9 @@ export default function ReviewQueue() {
   };
 
   const filtered = items.filter(item => {
-    if (priorityFilter === 'high' && item.priority < 7) return false;
-    if (priorityFilter === 'medium' && (item.priority < 4 || item.priority > 6)) return false;
-    if (priorityFilter === 'low' && item.priority > 3) return false;
+    if (priorityFilter === 'high' && item.priority > 2) return false;
+    if (priorityFilter === 'medium' && item.priority !== 3) return false;
+    if (priorityFilter === 'low' && item.priority < 4) return false;
     if (riskFilter !== 'all' && item.riskType.toLowerCase() !== riskFilter.toLowerCase()) return false;
     return true;
   });
@@ -48,9 +48,9 @@ export default function ReviewQueue() {
     );
   }
 
-  const highCount = items.filter(i => i.priority >= 7).length;
-  const medCount = items.filter(i => i.priority >= 4 && i.priority < 7).length;
-  const lowCount = items.filter(i => i.priority < 4).length;
+  const highCount = items.filter(i => i.priority <= 2).length;
+  const medCount = items.filter(i => i.priority === 3).length;
+  const lowCount = items.filter(i => i.priority >= 4).length;
 
   return (
     <>
@@ -114,8 +114,8 @@ export default function ReviewQueue() {
           </div>
         ) : (
           filtered.map(item => {
-            const color = item.priority >= 7 ? 'var(--danger)' : item.priority >= 4 ? 'var(--warning)' : 'var(--success)';
-            const prioClass = item.priority >= 7 ? 'badge-danger' : item.priority >= 4 ? 'badge-warning' : 'badge-success';
+            const color = item.priority <= 2 ? 'var(--danger)' : item.priority === 3 ? 'var(--warning)' : 'var(--success)';
+            const prioClass = item.priority <= 2 ? 'badge-danger' : item.priority === 3 ? 'badge-warning' : 'badge-success';
 
             return (
               <div className="review-card" key={item.id} style={{ '--review-color': color } as React.CSSProperties}>

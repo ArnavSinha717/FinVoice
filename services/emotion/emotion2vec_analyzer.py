@@ -49,6 +49,32 @@ class SegmentEmotion(BaseModel):
     low_confidence: bool = Field(default=False, description="True if emotion was below confidence threshold")
 
 
+# Free VRAM (MiB) required before emotion2vec will claim the GPU. The model is
+# ~1.2 GB; the margin leaves room for WhisperX and the resident Ollama model.
+_EMOTION_VRAM_MARGIN_MB = int(os.getenv("FINVOICE_EMOTION_VRAM_MARGIN_MB", "2200"))
+
+
+def _select_emotion_device() -> str:
+    """Choose cuda or cpu for emotion2vec, preferring cuda when there is headroom."""
+    forced = os.getenv("FINVOICE_EMOTION_DEVICE", "auto").strip().lower()
+    if forced in ("cpu", "cuda"):
+        return forced
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return "cpu"
+        free_mb = torch.cuda.mem_get_info()[0] // (1024 ** 2)
+        if free_mb >= _EMOTION_VRAM_MARGIN_MB:
+            logger.info(f"emotion2vec -> cuda ({free_mb} MiB free)")
+            return "cuda"
+        logger.info(f"emotion2vec -> cpu (only {free_mb} MiB free, "
+                    f"need {_EMOTION_VRAM_MARGIN_MB} MiB)")
+        return "cpu"
+    except Exception as e:
+        logger.warning(f"Could not inspect VRAM, using CPU for emotion2vec: {e}")
+        return "cpu"
+
+
 def _get_model():
     """Load emotion2vec model (lazy, cached).
 
@@ -71,19 +97,35 @@ def _get_model():
     #
     # Nuclear fix: after AutoModel creates the model, manually reload the checkpoint
     # weights with assign=True, forcing real tensors to replace meta placeholders.
-    logger.info("Loading emotion2vec_plus_large on CPU...")
+    # Device choice. This was pinned to CPU when the pipeline used qwen3:8b (5.2 GB
+    # of a 6 GB card), which left no room for anything else. That model is gone:
+    # qwen2.5:3b is ~2.2 GB and WhisperX ~1.2 GB, so there is headroom. emotion2vec
+    # had meanwhile become the slowest analyzer — 30-60s of a 65-88s pipeline, all
+    # of it CPU inference.
+    #
+    # FINVOICE_EMOTION_DEVICE forces the choice; the default inspects free VRAM and
+    # falls back to CPU rather than risking an OOM mid-run.
+    _device = _select_emotion_device()
+    logger.info(f"Loading emotion2vec_plus_large on {_device}...")
     try:
         _model = AutoModel(
             model="iic/emotion2vec_plus_large",
             trust_remote_code=True,
-            device="cpu",
+            device=_device,
             disable_update=True,
         )
 
         # Find the checkpoint file and reload weights directly
-        ckpt_path = os.path.expanduser(
-            "~/.cache/modelscope/hub/models/iic/emotion2vec_plus_large/model.pt"
-        )
+        # ModelScope has used two cache layouts; check both rather than silently
+        # skipping the meta-tensor weight reload below.
+        import glob as _glob
+        _candidates = [
+            os.path.expanduser("~/.cache/modelscope/hub/models/iic/emotion2vec_plus_large/model.pt"),
+            *sorted(_glob.glob(os.path.expanduser(
+                "~/.cache/modelscope/models/iic--emotion2vec_plus_large/snapshots/*/model.pt"
+            ))),
+        ]
+        ckpt_path = next((c for c in _candidates if os.path.exists(c)), _candidates[0])
         if os.path.exists(ckpt_path):
             # Get the actual nn.Module inside FunASR's wrapper
             inner_model = None
@@ -99,7 +141,7 @@ def _get_model():
                 )
                 if meta_before > 0:
                     logger.info(f"emotion2vec: {meta_before} meta tensors detected, reloading weights...")
-                    checkpoint = torch.load(ckpt_path, map_location="cpu")
+                    checkpoint = torch.load(ckpt_path, map_location=_device)
                     # FunASR checkpoints often have a 'model' key wrapping state_dict
                     if isinstance(checkpoint, dict) and 'model' in checkpoint:
                         state_dict = checkpoint['model']
@@ -208,12 +250,19 @@ def _parse_emotion_result(result_item, segment_id: int, speaker: str) -> Segment
         primary = "neutral"
         primary_score = score_dict.get("neutral", primary_score)
 
+    # emotion2vec softmax output can land a hair outside [0, 1] (e.g. 1.0000000149)
+    # from float32 rounding. SegmentEmotion constrains the score to [0, 1], so an
+    # unclamped value raises ValidationError and discards the whole batch — which
+    # silently produced zero emotions for the entire call.
+    def _clamp(x: float) -> float:
+        return round(min(1.0, max(0.0, float(x))), 3)
+
     return SegmentEmotion(
         segment_id=segment_id,
         speaker=speaker,
         emotion=primary,
-        emotion_score=round(primary_score, 3),
-        all_scores={k: round(v, 3) for k, v in score_dict.items()},
+        emotion_score=_clamp(primary_score),
+        all_scores={k: _clamp(v) for k, v in score_dict.items()},
         low_confidence=is_low_confidence,
     )
 
@@ -243,6 +292,10 @@ def analyze_emotions(
     model = _get_model()
     if model is None:
         logger.warning("emotion2vec not available — skipping emotion analysis")
+        from pipeline.degradations import report
+        report("emotion2vec", "model unavailable (check the funasr version pin)",
+               "segment_emotions, emotion_distribution, speaker_emotion_breakdown, "
+               "emotion_transitions and escalation_moments are all empty")
         return []
 
     if audio_array is not None:

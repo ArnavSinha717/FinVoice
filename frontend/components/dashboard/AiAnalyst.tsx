@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { queryAuditTrail, getBackboardStatus, type BackboardStatus } from '@/lib/api';
+import { queryAuditTrail, getStats, getHealth, type HealthStatus } from '@/lib/api';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -22,11 +22,13 @@ export default function AiAnalyst() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState<BackboardStatus | null>(null);
+  const [health, setHealth] = useState<HealthStatus | null>(null);
+  const [callCount, setCallCount] = useState<number | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    getBackboardStatus().then(setStatus);
+    getHealth().then(setHealth);
+    getStats().then(s => setCallCount(s.totalCalls));
   }, []);
 
   useEffect(() => {
@@ -69,13 +71,13 @@ export default function AiAnalyst() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{
                 width: 6, height: 6, borderRadius: '50%',
-                background: status?.configured ? 'var(--success)' : 'var(--text-dim)',
+                background: health?.ollama?.status === 'healthy' ? 'var(--success)' : 'var(--danger)',
                 display: 'inline-block',
               }} />
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--text-dim)' }}>
-                {status?.configured
-                  ? `AI Memory Active — ${status.calls_stored || 0} calls indexed`
-                  : 'Backboard not configured'}
+                {health?.ollama?.status === 'healthy'
+                  ? `Local LLM ready${callCount !== null ? ` — ${callCount} call${callCount === 1 ? '' : 's'} indexed` : ''}`
+                  : 'Local LLM offline — start Ollama'}
               </span>
             </div>
           </div>
@@ -88,7 +90,7 @@ export default function AiAnalyst() {
           {messages.length === 0 && (
             <div style={{ padding: 'var(--sp-4)' }}>
               <p style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: 'var(--text-dim)', marginBottom: 'var(--sp-4)', lineHeight: 1.6 }}>
-                Ask questions about your call portfolio. Backboard&apos;s GPT-4o analyzes across all stored calls.
+                Ask questions about your call portfolio. Answered on-device by the local LLM over your processed calls — no call data leaves this machine.
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
                 {QUICK_QUERIES.map((q, i) => (

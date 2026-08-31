@@ -62,6 +62,9 @@ def _get_pipeline():
     except Exception as e:
         logger.warning(f"Zero-shot scam classifier not available: {e}")
         HAS_ZERO_SHOT = False
+        from pipeline.degradations import report
+        report("zero_shot_scam", f"mDeBERTa NLI model unavailable: {e}",
+               "scam_* fraud signals unavailable")
         return None
 
 

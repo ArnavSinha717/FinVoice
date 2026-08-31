@@ -80,6 +80,30 @@ def _get_prohibited(lang: str = "en") -> dict[str, list[str]]:
     return phrases
 
 
+_AGENT_LABELS = {"agent", "speaker_00", "speaker a"}
+
+
+def _has_speaker_roles(segments: list) -> bool:
+    """True if diarization actually assigned agent/customer roles.
+
+    Without an HF_TOKEN, diarization is skipped and every segment comes back as
+    "unknown". Agent-attributed checks would then see empty text: they would fail
+    every disclosure the agent actually made, and miss prohibited language the
+    agent actually used. Callers fall back to the whole transcript instead.
+
+    Note this fallback is only safe for checks that ask "was this said at all".
+    Checks comparing agent vs customer talk time must stay disabled without roles.
+    """
+    return any(s.get("speaker", "").lower() in _AGENT_LABELS for s in segments)
+
+
+def _agent_segments(segments: list) -> list:
+    """Agent segments, or every segment when diarization produced no roles."""
+    if _has_speaker_roles(segments):
+        return [s for s in segments if s.get("speaker", "").lower() in _AGENT_LABELS]
+    return list(segments)
+
+
 def _get_agent_opening_text(segments: list, max_seconds: float = 30.0) -> str:
     """Get agent's opening speech by cumulative talk time, not clock time.
 
@@ -87,12 +111,9 @@ def _get_agent_opening_text(segments: list, max_seconds: float = 30.0) -> str:
     This is robust to hold music, IVR menus, or late-start recordings where
     clock time doesn't reflect actual agent speech.
     """
-    _agent_labels = {"agent", "speaker_00", "speaker a"}
     texts = []
     cumulative = 0.0
-    for seg in segments:
-        if seg.get("speaker", "").lower() not in _agent_labels:
-            continue
+    for seg in _agent_segments(segments):
         duration = seg.get("end", 0) - seg.get("start", 0)
         texts.append(seg.get("text", ""))
         cumulative += duration
@@ -146,9 +167,7 @@ def run_compliance_checks(
     # (speakers are labeled "Speaker A"/"Speaker B", not "agent"/"customer").
     if call_type in _REGULATED_CALL_TYPES:
         full_agent_text = " ".join(
-            s.get("text", "")
-            for s in transcript_segments
-            if s.get("speaker", "").lower() in ("agent", "speaker_00")
+            s.get("text", "") for s in _agent_segments(transcript_segments)
         ).lower()
     else:
         full_agent_text = " ".join(
@@ -225,6 +244,8 @@ def run_compliance_checks(
             regulation="General_Compliance",
             severity="low",
         ))
+
+    checks.extend(check_dpdp_compliance(transcript_segments, call_type, lang))
 
     return checks
 
@@ -329,6 +350,117 @@ def _check_call_conduct(segments: list, call_type: str, lang: str = "en") -> lis
                         severity="high",
                     ))
             break
+
+    return checks
+
+
+# ── Digital Personal Data Protection Act, 2023 ──
+# Tier 1 keyword checks for the DPDP obligations that are observable in a call:
+# purpose notice (S.5), free and informed consent (S.6), communication of the
+# data principal's rights (S.12-13), and data minimisation (S.6(1)).
+
+# Language indicating the agent is requesting personal data from the customer.
+_DPDP_DATA_REQUESTS = [
+    "aadhaar", "aadhar", "pan number", "pan card", "date of birth", "dob",
+    "account number", "card number", "cvv", "otp", "one time password",
+    "mother's maiden name", "your address", "email address", "mobile number",
+]
+
+# Agent states WHY the data is needed.
+_DPDP_PURPOSE_PHRASES = [
+    "for the purpose of", "in order to verify", "to verify your identity",
+    "this is required for", "we need this to", "used only for",
+    "for verification purposes", "as part of kyc", "to process your",
+]
+
+# Agent seeks affirmative permission before collecting.
+_DPDP_CONSENT_PHRASES = [
+    "do you consent", "may i have your", "can i confirm your", "is that okay",
+    "with your permission", "do you agree", "are you comfortable sharing",
+    "would you like to proceed", "do i have your consent",
+]
+
+# Agent communicates the data principal's rights.
+_DPDP_RIGHTS_PHRASES = [
+    "withdraw your consent", "grievance", "data protection officer",
+    "you can request deletion", "right to erasure", "opt out",
+    "privacy policy", "your data rights", "lodge a complaint",
+]
+
+# Identifiers that are excessive outside identity-verification contexts.
+_DPDP_SENSITIVE_IDS = ["aadhaar", "aadhar", "cvv", "otp", "one time password"]
+_DPDP_MINIMISATION_EXEMPT = {"kyc", "onboarding"}
+
+
+def check_dpdp_compliance(
+    transcript_segments: list, call_type: str, lang: str = "en"
+) -> list[ComplianceCheck]:
+    """Check a call against the Digital Personal Data Protection Act, 2023.
+
+    Only applies to regulated call types — an earnings call has no data principal.
+    Checks are skipped entirely when the agent never requests personal data,
+    so a call that collects nothing is not penalised for missing a consent notice.
+    """
+    if call_type not in _REGULATED_CALL_TYPES:
+        return []
+
+    severity_map = _SEVERITY_BY_CALL_TYPE.get(call_type, _SEVERITY_BY_CALL_TYPE["general"])
+    agent_text = " ".join(
+        s.get("text", "") for s in _agent_segments(transcript_segments)
+    ).lower()
+
+    if not agent_text:
+        return []
+
+    requested = [kw for kw in _DPDP_DATA_REQUESTS if kw in agent_text]
+    if not requested:
+        # No personal data solicited — DPDP processing obligations are not triggered.
+        return []
+
+    checks: list[ComplianceCheck] = []
+
+    def _add(name: str, phrases: list[str], violation, regulation: str, raw_severity: str, detail: str):
+        found = any(p in agent_text for p in phrases)
+        checks.append(ComplianceCheck(
+            check_name=name,
+            passed=found,
+            violation_type=None if found else violation,
+            evidence_text=None if found else detail,
+            regulation=regulation,
+            severity=severity_map.get(raw_severity, "low") if not found else "low",
+        ))
+
+    _add(
+        "dpdp_purpose_notice", _DPDP_PURPOSE_PHRASES,
+        ComplianceViolationType.MISSING_DISCLOSURE,
+        "DPDP_Act_2023_Section_5", "high",
+        f"Agent requested {', '.join(requested[:3])} without stating the purpose of collection.",
+    )
+    _add(
+        "dpdp_consent_obtained", _DPDP_CONSENT_PHRASES,
+        ComplianceViolationType.CONSENT_NOT_OBTAINED,
+        "DPDP_Act_2023_Section_6", "critical",
+        f"Agent requested {', '.join(requested[:3])} without seeking affirmative consent.",
+    )
+    _add(
+        "dpdp_rights_notice", _DPDP_RIGHTS_PHRASES,
+        ComplianceViolationType.MISSING_DISCLOSURE,
+        "DPDP_Act_2023_Section_12", "medium",
+        "Customer was not informed of consent withdrawal or grievance redressal rights.",
+    )
+
+    # Data minimisation: sensitive identifiers outside an identity-verification call.
+    if call_type not in _DPDP_MINIMISATION_EXEMPT:
+        excessive = [kw for kw in _DPDP_SENSITIVE_IDS if kw in agent_text]
+        if excessive:
+            checks.append(ComplianceCheck(
+                check_name="dpdp_data_minimisation",
+                passed=False,
+                violation_type=ComplianceViolationType.PRIVACY_VIOLATION,
+                evidence_text=f"Requested {', '.join(excessive)} on a '{call_type}' call, which does not require identity verification.",
+                regulation="DPDP_Act_2023_Section_6_1",
+                severity=severity_map.get("high", "low"),
+            ))
 
     return checks
 

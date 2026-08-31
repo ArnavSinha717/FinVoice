@@ -4,6 +4,8 @@ Runs on CPU (Parselmouth + numpy). No GPU needed.
 On multi-machine setups, emotion2vec runs on Bravo — this module handles Alpha's CPU-only signals.
 """
 
+import os
+import re
 import numpy as np
 from loguru import logger
 from config.schemas import FraudSignal
@@ -24,6 +26,9 @@ def analyze_voice_stress(wav_path: str, segments: list) -> list[FraudSignal]:
     Establishes per-speaker baseline from first 30s, then flags deviations.
     """
     if not HAS_PARSELMOUTH:
+        from pipeline.degradations import report
+        report("voice_stress", "praat-parselmouth not installed",
+               "no jitter/shimmer/HNR analysis; voice_stress_anomaly fraud signals unavailable")
         return []
 
     signals = []
@@ -408,6 +413,36 @@ def detect_abuse_signals(segments: list) -> list[FraudSignal]:
     return signals
 
 
+# Cheap keyword gate in front of the zero-shot NLI model, mirroring the tier-1
+# prefilter already used for intent classification. mDeBERTa runs 5 hypotheses per
+# segment on CPU; on a 29-segment call that measured 85s — the single largest cost
+# in the pipeline. Most segments are benign small talk and cannot be scams.
+#
+# TRADEOFF: this is a recall/latency trade on a *fraud* detector, so the cue list is
+# deliberately broad — it should over-admit. Set FINVOICE_SCAM_PREFILTER=0 to
+# classify every segment (slower, maximal recall) and to measure what the gate costs.
+_SCAM_CUES = re.compile(
+    r"\b(otp|one[- ]time|password|passcode|pin|cvv|card number|account number|"
+    r"aadhaar|aadhar|pan\s*(card|number)|date of birth|dob|mother'?s maiden|"
+    r"upi|ifsc|net ?banking|login|username|credential|verify|verification|"
+    r"share|send me|tell me|give me|confirm your|provide your|"
+    r"urgent|immediately|right now|today only|last chance|expire|expiring|blocked|"
+    r"suspend|suspended|freeze|frozen|legal action|police|arrest|court|warrant|"
+    r"penalty|fine|seize|recovery|transfer|refund|reward|prize|lottery|cashback|"
+    r"remote|anydesk|teamviewer|screen ?share|install|link|click)\b",
+    re.IGNORECASE,
+)
+
+_SCAM_PREFILTER_ENABLED = os.getenv("FINVOICE_SCAM_PREFILTER", "1") != "0"
+
+
+def _is_scam_candidate(text: str) -> bool:
+    """True if a segment is worth spending a zero-shot NLI pass on."""
+    if not _SCAM_PREFILTER_ENABLED:
+        return True
+    return bool(_SCAM_CUES.search(text))
+
+
 def detect_scam_zero_shot(segments: list) -> list[FraudSignal]:
     """Detect scam patterns using zero-shot mDeBERTa (100+ languages).
 
@@ -426,7 +461,7 @@ def detect_scam_zero_shot(segments: list) -> list[FraudSignal]:
 
     for i, seg in enumerate(segments):
         text = seg.get("text", "").strip()
-        if text and len(text) > 10:
+        if text and len(text) > 10 and _is_scam_candidate(text):
             texts.append(text)
             seg_map.append((i, seg.get("speaker", "unknown")))
 

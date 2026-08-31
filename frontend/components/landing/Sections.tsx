@@ -41,35 +41,38 @@ export function Features() {
   );
 }
 
-/* ===== BACKBOARD SECTION ===== */
-export function Backboard() {
+/* ===== INTELLIGENCE LAYER =====
+   Was a "Powered by Backboard.io" section from the hackathon. That dependency is
+   gone and the stack now runs entirely on-device, so the section describes what
+   the pipeline actually does rather than a sponsor integration. */
+export function IntelligenceLayer() {
   const cells = [
-    { Icon: LLMRoutingIcon, title: 'LLM Routing', desc: 'Intelligent model selection per task' },
-    { Icon: MemoryIcon, title: 'Memory', desc: 'Cross-call context persistence' },
-    { Icon: RAGIcon, title: 'RAG', desc: 'Regulatory knowledge retrieval' },
-    { Icon: EmbeddingsIcon, title: 'Embeddings', desc: 'Semantic similarity search' },
-    { Icon: AuditTrailIcon, title: 'Audit Trail', desc: 'Full LLM decision logging' },
+    { Icon: LLMRoutingIcon, title: 'Local LLM', desc: 'Qwen 2.5 via Ollama, on-device' },
+    { Icon: MemoryIcon, title: 'Structured Records', desc: 'One typed CallRecord per call' },
+    { Icon: RAGIcon, title: 'Compliance Engine', desc: 'RBI Fair Practice Code, KYC, DPDP 2023' },
+    { Icon: EmbeddingsIcon, title: 'PII Redaction', desc: 'Aadhaar, PAN, UPI, IFSC with checksums' },
+    { Icon: AuditTrailIcon, title: 'Audit Trail', desc: 'Every analyzer and degradation logged' },
   ];
 
   return (
-    <section className="section backboard-section" id="backboard">
+    <section className="section intelligence-section" id="intelligence">
       <div className="container">
         <div className="fade-up" style={{ textAlign: 'center' }}>
-          <p className="section-label" style={{ color: 'var(--s5)', borderColor: 'rgba(168,85,247,0.3)' }}>Powered by Backboard.io</p>
-          <h2 className="section-title gradient-text">Intelligent LLM Orchestration</h2>
+          <p className="section-label" style={{ color: 'var(--s5)', borderColor: 'rgba(168,85,247,0.3)' }}>Runs entirely on-device</p>
+          <h2 className="section-title gradient-text">Local Intelligence Layer</h2>
         </div>
-        <div className="backboard-grid fade-up">
+        <div className="intelligence-grid fade-up">
           {cells.map((cell, i) => (
             <div key={cell.title} style={{ display: 'contents' }}>
-              <div className="backboard-cell">
-                <div className="backboard-icon">
+              <div className="intelligence-cell">
+                <div className="intelligence-icon">
                   <cell.Icon color="#a855f7" size={48} />
                 </div>
                 <h4>{cell.title}</h4>
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)', fontWeight: 300 }}>{cell.desc}</p>
               </div>
               {i < cells.length - 1 && (
-                <div className="backboard-connector"><div className="connector-line" /></div>
+                <div className="intelligence-connector"><div className="connector-line" /></div>
               )}
             </div>
           ))}
@@ -82,10 +85,10 @@ export function Backboard() {
 /* ===== INFRASTRUCTURE SECTION ===== */
 export function Infrastructure() {
   const nodes = [
-    { Icon: GPUAlphaIcon, title: 'Alpha \u00B7 RTX 3060', desc: 'Whisper inference, diarization, initial NLU processing', accent: 'var(--s3)', color: '#f59e0b', badgeClass: 'badge-warning', badgeText: 'GPU', spec: '12GB VRAM' },
-    { Icon: GPUBravoIcon, title: 'Bravo \u00B7 RTX 4050', desc: 'Advanced NER, sentiment models, fraud pattern detection', accent: 'var(--s2)', color: '#10b981', badgeClass: 'badge-success', badgeText: 'GPU', spec: '8GB VRAM' },
-    { Icon: CPUClusterIcon, title: 'CPU Cluster', desc: 'Audio preprocessing, rule engine, data export, API serving', accent: 'var(--s1)', color: '#6366f1', badgeClass: 'badge-info', badgeText: 'CPU', spec: '32 cores' },
-    { Icon: CloudIcon, title: 'Backboard Cloud', desc: 'LLM orchestration, RAG, embeddings, audit storage', accent: 'var(--s5)', color: '#a855f7', badgeClass: 'badge-purple', badgeText: 'Cloud', spec: 'Managed' },
+    { Icon: GPUAlphaIcon, title: 'GPU \u00B7 WhisperX', desc: 'ASR with word-level alignment and speaker diarization', accent: 'var(--s3)', color: '#f59e0b', badgeClass: 'badge-warning', badgeText: 'GPU', spec: 'large-v3-turbo, INT8' },
+    { Icon: GPUBravoIcon, title: 'GPU \u00B7 Emotion + LLM', desc: 'emotion2vec and Qwen 2.5 extraction, VRAM-aware scheduling', accent: 'var(--s2)', color: '#10b981', badgeClass: 'badge-success', badgeText: 'GPU', spec: 'fits in 6GB' },
+    { Icon: CPUClusterIcon, title: 'CPU', desc: 'Audio preprocessing, rule engine, PII, exports, API serving', accent: 'var(--s1)', color: '#6366f1', badgeClass: 'badge-info', badgeText: 'CPU', spec: 'parallel analyzers' },
+    { Icon: CloudIcon, title: 'No Cloud', desc: 'No call audio, transcript or PII leaves the machine', accent: 'var(--s5)', color: '#a855f7', badgeClass: 'badge-purple', badgeText: 'Local', spec: 'on-device' },
   ];
 
   return (

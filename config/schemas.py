@@ -248,6 +248,14 @@ class CallRecord(BaseModel):
     review_priority: int = Field(ge=1, le=5, description="1=urgent, 5=routine")
     review_reasons: list[str]
 
+    # Analyzers that did not run, or ran in a reduced mode. Empty means every
+    # component executed. Consumers (and any evaluation harness) must check this
+    # before treating an absent result as a negative result.
+    degradations: list[dict] = Field(
+        default_factory=list,
+        description="Components that silently degraded: [{component, reason, impact, severity}]",
+    )
+
     # Pipeline Performance
     pipeline_timings: dict = Field(
         default_factory=dict,
@@ -263,11 +271,25 @@ class CallRecord(BaseModel):
         default_factory=list,
         description="Significant emotion shifts per speaker: [{speaker, from_emotion, to_emotion, at_segment, significance}]"
     )
+    escalation_moments: list[dict] = Field(
+        default_factory=list,
+        description="Segments where the customer turned angry/frustrated: [{segment_id, speaker, emotion, score}]"
+    )
 
     # Call Summary
     call_summary: str = Field(description="2-3 sentence natural language summary")
     key_outcomes: list[str] = Field(description="Bullet points of call outcomes")
     next_actions: list[str] = Field(description="Required follow-up actions")
+
+    # Figures computed in code from extracted entities, never by the LLM.
+    derived_totals: dict = Field(
+        default_factory=dict,
+        description="Sums/counts per entity type, computed from financial_entities",
+    )
+    numeric_audit: dict = Field(
+        default_factory=dict,
+        description="What the numeric guard removed: {removed_currency_claims, unsupported_figures}",
+    )
 
     # Financial Insights (synthesized analysis for end users)
     financial_insights: dict = Field(

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { getBackboardStatus, type BackboardStatus } from '@/lib/api';
+import { getHealth, type HealthStatus } from '@/lib/api';
 
 type View = 'overview' | 'upload' | 'calls' | 'review' | 'exports' | 'settings';
 
@@ -22,10 +22,14 @@ const NAV_ITEMS: { view: View; icon: string; label: string }[] = [
 ];
 
 export default function Sidebar({ activeView, onNavigate, open }: SidebarProps) {
-  const [bbStatus, setBbStatus] = useState<BackboardStatus | null>(null);
+  // Was a Backboard 'AI Memory' badge. Backboard is gone; this now reports
+  // something the operator can act on — whether the local LLM is reachable.
+  const [health, setHealth] = useState<HealthStatus | null>(null);
 
   useEffect(() => {
-    getBackboardStatus().then(setBbStatus);
+    getHealth().then(setHealth);
+    const t = setInterval(() => getHealth().then(setHealth), 30000);
+    return () => clearInterval(t);
   }, []);
 
   return (
@@ -55,18 +59,18 @@ export default function Sidebar({ activeView, onNavigate, open }: SidebarProps) 
           <span className="status-dot" />
           <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Pipeline active</span>
         </div>
-        {bbStatus && (
+        {health && (
           <div className="sidebar-status">
             <span style={{
               width: 8, height: 8, borderRadius: '50%',
-              background: bbStatus.configured ? 'var(--s5)' : 'var(--text-dim)',
+              background: health.ollama?.status === 'healthy' ? 'var(--s5)' : 'var(--danger)',
               display: 'inline-block', flexShrink: 0,
-              animation: bbStatus.configured ? 'pulse 2s ease-in-out infinite' : 'none',
+              animation: health.ollama?.status === 'healthy' ? 'pulse 2s ease-in-out infinite' : 'none',
             }} />
             <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
-              {bbStatus.configured
-                ? `AI Memory (${bbStatus.calls_stored || 0})`
-                : 'AI Memory off'}
+              {health.ollama?.status === 'healthy'
+                ? `Local LLM ready${health.whisperx_loaded ? ' · ASR loaded' : ''}`
+                : 'Local LLM offline'}
             </span>
           </div>
         )}

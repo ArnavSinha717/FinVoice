@@ -20,78 +20,95 @@
     "வருக வருக"
   ],
   "trivial_phrases": [
+    "hello",
+    "hi",
+    "no",
+    "okay",
+    "thank you",
+    "thanks",
+    "yes",
     "ஆமா",
-    "இல்லை",
-    "சரி",
-    "சரிங்க",
-    "நன்றி",
-    "புரிகிறது",
-    "புரிஞ்சுது",
-    "ஓகே",
-    "தெரியும்",
-    "ஆமா சார்",
-    "சரி சார்",
-    "நன்றி சார்",
-    "சரி சரி",
     "ஆமா ஆமா",
-    "ம்ம்",
-    "ஆமாம்",
-    "கரெக்ட்",
-    "சரியா",
-    "தெரியும் சார்",
-    "புரிந்தது",
-    "புரிந்தது சார்",
-    "புரிஞ்சுது சார்",
-    "நன்றி மேடம்",
-    "நன்றி அண்ணா",
-    "சரி மேடம்",
+    "ஆமா சார்",
     "ஆமா மேடம்",
+    "ஆமாம்",
+    "இல்லை",
+    "ஒரு நிமிஷம்",
+    "ஓகே",
     "ஓகே சார்",
     "ஓகே மேடம்",
+    "கரெக்ட்",
+    "கேக்குறேன்",
+    "கேட்டுக்கிறேன்",
+    "கொஞ்சம் நேரம்",
+    "சரி",
+    "சரி சரி",
+    "சரி சார்",
+    "சரி செய்கிறேன்",
+    "சரி பை",
+    "சரி மேடம்",
+    "சரிங்க",
+    "சரியா",
     "செய்கிறேன்",
     "செய்யறேன்",
     "செய்வேன்",
-    "பண்றேன்",
-    "பண்ணுறேன்",
     "சொல்லுங்க",
-    "கொஞ்சம் நேரம்",
-    "ஒரு நிமிஷம்",
-    "கேட்டுக்கிறேன்",
-    "கேக்குறேன்",
-    "போய் வருகிறேன்",
+    "தெரியும்",
+    "தெரியும் சார்",
+    "நன்றி",
+    "நன்றி அண்ணா",
+    "நன்றி சார்",
+    "நன்றி பை",
+    "நன்றி மேடம்",
+    "பண்ணுறேன்",
+    "பண்றேன்",
+    "பார்க்கலாம்",
+    "புரிகிறது",
+    "புரிஞ்சுது",
+    "புரிஞ்சுது சார்",
+    "புரிந்தது",
+    "புரிந்தது சார்",
     "பை",
     "பை சார்",
-    "நன்றி பை",
-    "சரி பை",
-    "வணக்கம் பை",
-    "ரொம்ப நன்றி",
+    "போய் வருகிறேன்",
     "மிக்க நன்றி",
-    "சரி செய்கிறேன்",
-    "பார்க்கலாம்"
+    "ம்ம்",
+    "ரொம்ப நன்றி",
+    "வணக்கம் பை"
   ],
   "currency_words": [
     {
       "words": [
         "ரூபாய்",
-        "ரூ"
+        "ரூ",
+        "ரூபா",
+        "rubaai",
+        "rupees",
+        "rupee"
       ],
       "currency": "INR"
     },
     {
       "words": [
-        "லட்சம்"
+        "லட்சம்",
+        "latcham",
+        "lakh"
       ],
       "currency": "INR_LAKH"
     },
     {
       "words": [
-        "கோடி"
+        "கோடி",
+        "kodi",
+        "crore"
       ],
       "currency": "INR_CRORE"
     },
     {
       "words": [
-        "ஆயிரம்"
+        "ஆயிரம்",
+        "aayiram",
+        "thousand"
       ],
       "currency": "INR_THOUSAND"
     }
@@ -137,7 +154,14 @@
           "நிறுவனத்திலிருந்து",
           "தொலைபேசி செய்கிறேன்",
           "நான் பேசுகிறேன்",
-          "அழைக்கிறேன்"
+          "அழைக்கிறேன்",
+          "பேசுகிறேன்",
+          "நான்",
+          "calling from",
+          "this is",
+          "speaking from",
+          "financial services",
+          "இருந்து"
         ],
         "regulation": "RBI_Fair_Practice_Code_Section_4"
       },
@@ -149,7 +173,12 @@
           "செலுத்தாத தொகை",
           "இஎம்ஐ",
           "கடன் கணக்கு",
-          "நிலுவை தொகை"
+          "நிலுவை தொகை",
+          "பற்றி",
+          "loan account",
+          "personal loan",
+          "regarding your",
+          "about your"
         ],
         "regulation": "RBI_Fair_Practice_Code_Section_4"
       },
@@ -157,7 +186,12 @@
         "keywords": [
           "அழைப்பு பதிவு செய்யப்படுகிறது",
           "பதிவு செய்யப்படும்",
-          "தரம் மற்றும் பயிற்சி"
+          "தரம் மற்றும் பயிற்சி",
+          "call recording",
+          "recording",
+          "recorded",
+          "பதிவு",
+          "quality"
         ],
         "regulation": "IT_Act_2000_Section_43A"
       },
@@ -167,7 +201,12 @@
           "நிலுவை",
           "தாமதம்",
           "காலாவதி",
-          "கடன் தொகை"
+          "கடன் தொகை",
+          "outstanding",
+          "late fee",
+          "overdue",
+          "due",
+          "payment"
         ],
         "regulation": "RBI_Fair_Practice_Code_Section_8"
       }
@@ -190,6 +229,49 @@
           "அங்கீகாரம்"
         ],
         "regulation": "Digital_Personal_Data_Protection_Act_2023"
+      },
+      "caller_identification": {
+        "keywords": [
+          "பேசுகிறேன்",
+          "நான்",
+          "calling from",
+          "this is",
+          "speaking from",
+          "financial services",
+          "இருந்து"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_4"
+      },
+      "purpose_disclosure": {
+        "keywords": [
+          "பற்றி",
+          "loan account",
+          "personal loan",
+          "regarding your",
+          "about your"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_4"
+      },
+      "recording_consent": {
+        "keywords": [
+          "call recording",
+          "recording",
+          "recorded",
+          "பதிவு",
+          "quality"
+        ],
+        "regulation": "IT_Act_2000_Section_43A"
+      },
+      "mini_miranda": {
+        "keywords": [
+          "outstanding",
+          "நிலுவை",
+          "late fee",
+          "overdue",
+          "due",
+          "payment"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_8"
       }
     },
     "consent": {
@@ -210,6 +292,49 @@
           "உங்கள் தேர்வு"
         ],
         "regulation": "Consumer_Protection_Act_2019"
+      },
+      "caller_identification": {
+        "keywords": [
+          "பேசுகிறேன்",
+          "நான்",
+          "calling from",
+          "this is",
+          "speaking from",
+          "financial services",
+          "இருந்து"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_4"
+      },
+      "purpose_disclosure": {
+        "keywords": [
+          "பற்றி",
+          "loan account",
+          "personal loan",
+          "regarding your",
+          "about your"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_4"
+      },
+      "recording_consent": {
+        "keywords": [
+          "call recording",
+          "recording",
+          "recorded",
+          "பதிவு",
+          "quality"
+        ],
+        "regulation": "IT_Act_2000_Section_43A"
+      },
+      "mini_miranda": {
+        "keywords": [
+          "outstanding",
+          "நிலுவை",
+          "late fee",
+          "overdue",
+          "due",
+          "payment"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_8"
       }
     },
     "onboarding": {
@@ -233,6 +358,49 @@
           "தீர்வு"
         ],
         "regulation": "RBI_Integrated_Ombudsman_Scheme_2021"
+      },
+      "caller_identification": {
+        "keywords": [
+          "பேசுகிறேன்",
+          "நான்",
+          "calling from",
+          "this is",
+          "speaking from",
+          "financial services",
+          "இருந்து"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_4"
+      },
+      "purpose_disclosure": {
+        "keywords": [
+          "பற்றி",
+          "loan account",
+          "personal loan",
+          "regarding your",
+          "about your"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_4"
+      },
+      "recording_consent": {
+        "keywords": [
+          "call recording",
+          "recording",
+          "recorded",
+          "பதிவு",
+          "quality"
+        ],
+        "regulation": "IT_Act_2000_Section_43A"
+      },
+      "mini_miranda": {
+        "keywords": [
+          "outstanding",
+          "நிலுவை",
+          "late fee",
+          "overdue",
+          "due",
+          "payment"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_8"
       }
     },
     "complaint": {
@@ -264,15 +432,96 @@
           "வங்கி குறைதீர்ப்பாளர்"
         ],
         "regulation": "RBI_Integrated_Ombudsman_Scheme_2021"
+      },
+      "caller_identification": {
+        "keywords": [
+          "பேசுகிறேன்",
+          "நான்",
+          "calling from",
+          "this is",
+          "speaking from",
+          "financial services",
+          "இருந்து"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_4"
+      },
+      "purpose_disclosure": {
+        "keywords": [
+          "பற்றி",
+          "loan account",
+          "personal loan",
+          "regarding your",
+          "about your"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_4"
+      },
+      "recording_consent": {
+        "keywords": [
+          "call recording",
+          "recording",
+          "recorded",
+          "பதிவு",
+          "quality"
+        ],
+        "regulation": "IT_Act_2000_Section_43A"
+      },
+      "mini_miranda": {
+        "keywords": [
+          "outstanding",
+          "நிலுவை",
+          "late fee",
+          "overdue",
+          "due",
+          "payment"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_8"
       }
     },
     "general": {
       "caller_identification": {
         "keywords": [
           "என் பெயர்",
-          "வங்கியிலிருந்து"
+          "வங்கியிலிருந்து",
+          "பேசுகிறேன்",
+          "நான்",
+          "calling from",
+          "this is",
+          "speaking from",
+          "financial services",
+          "இருந்து"
         ],
         "regulation": "RBI_Fair_Practice_Code_Section_4"
+      },
+      "purpose_disclosure": {
+        "keywords": [
+          "பற்றி",
+          "loan account",
+          "personal loan",
+          "regarding your",
+          "about your"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_4"
+      },
+      "recording_consent": {
+        "keywords": [
+          "call recording",
+          "recording",
+          "recorded",
+          "பதிவு",
+          "quality"
+        ],
+        "regulation": "IT_Act_2000_Section_43A"
+      },
+      "mini_miranda": {
+        "keywords": [
+          "outstanding",
+          "நிலுவை",
+          "late fee",
+          "overdue",
+          "due",
+          "payment"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_8"
       }
     }
   },

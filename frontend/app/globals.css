@@ -424,17 +424,17 @@ h4 { font-size: 1.15rem; }
 .feature-card h4 { margin-bottom: var(--sp-3); }
 
 /* BACKBOARD — glass cells */
-.backboard-section {
+.intelligence-section {
   background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--s5) 3%, var(--bg)) 30%, color-mix(in srgb, var(--s5) 3%, var(--bg)) 70%, transparent);
 }
-.backboard-grid { display: flex; align-items: center; justify-content: center; gap: 0; margin-top: var(--sp-12); overflow-x: auto; padding: var(--sp-4) 0; }
-.backboard-cell {
+.intelligence-grid { display: flex; align-items: center; justify-content: center; gap: 0; margin-top: var(--sp-12); overflow-x: auto; padding: var(--sp-4) 0; }
+.intelligence-cell {
   background: rgba(255,255,255,0.02); border: 1px solid color-mix(in srgb, var(--s5) 20%, rgba(255,255,255,0.05));
   border-radius: 20px; padding: var(--sp-6) var(--sp-5); text-align: center; min-width: 150px; transition: all .3s;
 }
-.backboard-cell:hover { border-color: var(--s5); box-shadow: 0 0 24px var(--s5-glow); transform: translateY(-2px); }
-.backboard-icon { margin-bottom: var(--sp-3); display: flex; justify-content: center; align-items: center; height: 52px; }
-.backboard-connector { width: 48px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.intelligence-cell:hover { border-color: var(--s5); box-shadow: 0 0 24px var(--s5-glow); transform: translateY(-2px); }
+.intelligence-icon { margin-bottom: var(--sp-3); display: flex; justify-content: center; align-items: center; height: 52px; }
+.intelligence-connector { width: 48px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .connector-line { width: 100%; height: 2px; background: var(--s5-dim); position: relative; }
 .connector-line::after {
   content: ''; position: absolute; top: 0; left: 0; width: 12px; height: 2px;
@@ -878,8 +878,8 @@ h4 { font-size: 1.15rem; }
   .container { padding: 0 var(--sp-4); }
   .nav-links { display: none !important; }
   .features-grid { grid-template-columns: 1fr; }
-  .backboard-grid { flex-direction: column; }
-  .backboard-connector { width: 2px; height: 32px; }
+  .intelligence-grid { flex-direction: column; }
+  .intelligence-connector { width: 2px; height: 32px; }
   .connector-line { width: 2px; height: 100%; }
   .infra-grid { flex-direction: column; }
   .infra-node { min-width: 100%; max-width: 100%; }

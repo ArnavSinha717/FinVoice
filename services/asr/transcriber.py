@@ -108,6 +108,8 @@ def is_whisperx_loaded() -> bool:
 # Financial term correction dictionary — data-driven, not guessed.
 # Run scripts/discover_corrections.py on Earnings-21 to build the full version.
 # These are seed corrections; the discovery script will expand this.
+_ORG_ALIASES: dict = {}
+
 FINANCIAL_CORRECTIONS = {
     "emmy": "EMI", "emi": "EMI",
     "kayak": "KYC", "kayc": "KYC",
@@ -132,6 +134,8 @@ AMOUNT_PATTERNS = [
 
 def load_correction_dictionary(path: str = "data/models/financial_corrections.json") -> dict:
     """Load data-driven corrections if available, otherwise use seed dict."""
+    global _ORG_ALIASES
+    _ORG_ALIASES = _load_org_aliases()
     corrections = dict(FINANCIAL_CORRECTIONS)
     if Path(path).exists():
         with open(path) as f:
@@ -280,8 +284,18 @@ def transcribe_audio(
             logger.info("Speaker diarization complete")
         except Exception as e:
             logger.warning(f"Diarization failed (continuing without): {e}")
+            from pipeline.degradations import report
+            report("diarization", f"pyannote failed: {e}",
+                   "no speaker labels for this call")
     else:
         logger.warning("No HF token — skipping diarization")
+        from pipeline.degradations import report
+        report(
+            "diarization",
+            "HF_TOKEN not set (pyannote speaker-diarization-3.1 is gated)",
+            "no speaker labels: agent/customer talk share, per-speaker emotion, and "
+            "agent-domination / third-party-disclosure compliance checks are unavailable",
+        )
 
     # NOTE: WhisperX model is NOT unloaded here — it stays in GPU cache.
     # The orchestrator calls unload_whisperx() when it needs VRAM for
@@ -409,6 +423,54 @@ def _words_to_segment(words: list, speaker: str, original_seg: dict) -> dict:
     }
 
 
+# ── CONTEXTUAL CORRECTIONS ────────────────────────────────────────────────────
+# Some ASR errors cannot be fixed by a word-level mapping because the wrong token
+# is an ordinary English word. Whisper renders "EMI" as "me" or "m.e." — mapping
+# "me" -> "EMI" outright would corrupt every sentence containing the pronoun, so
+# these patterns require financial context around the token.
+#
+# Observed on real runs: "your me of 12,500 rupees" (English) and "आपकी m.e.
+# 12,500 रुपे" (Hindi). Both are the same error and both were previously uncorrected.
+CONTEXTUAL_CORRECTIONS: list[tuple[str, str]] = [
+    # "m.e." / "m e" as a spelled-out EMI
+    (r"\bm\.\s?e\.?(?=\s|$)", "EMI"),
+    (r"\bm\s+e\s+i\b", "EMI"),
+    # "me" preceded by a determiner and followed by a financial continuation
+    (r"\b(your|the|my|his|her|their|aapki|aapka|apna)\s+me\b(?=\s+(of|is|was|for|due|amount|payment|instal))",
+     r"\1 EMI"),
+    # "me of <amount>" — "your me of 12,500 rupees"
+    (r"\bme\s+of\s+(?=[\d₹$]|rs\b|rupee)", "EMI of "),
+    # "monthly me" / "me payment"
+    (r"\bmonthly\s+me\b", "monthly EMI"),
+    (r"\bme\s+(payment|amount|due date|instalment|installment)\b", r"EMI \1"),
+    # Common Indian-finance mishearings that need surrounding context
+    (r"\bsee\s+bill\b", "CIBIL"),
+    (r"\bpan\s+card\s+number\b", "PAN card number"),
+]
+
+
+def _load_org_aliases(path: str = "data/vocab/org_names.json") -> dict:
+    """Institution-name corrections, e.g. Whisper hearing 'Trybank' as 'Treebank'.
+
+    Proper nouns are the other class of error a generic dictionary cannot fix:
+    the right spelling depends on which institution the deployment serves. Ships
+    with the demo tenant and is extended per deployment rather than hardcoded.
+    """
+    aliases = {
+        "treebank": "Trybank",
+        "try bank": "Trybank",
+        "tri bank": "Trybank",
+        "trybank": "Trybank",
+    }
+    try:
+        p = Path(path)
+        if p.exists():
+            aliases.update({k.lower(): v for k, v in json.loads(p.read_text()).items()})
+    except Exception as e:
+        logger.warning(f"Could not load org aliases from {path}: {e}")
+    return aliases
+
+
 def _apply_corrections(segments: list, corrections: dict) -> list:
     """Apply financial term corrections to transcript segments.
 
@@ -423,6 +485,14 @@ def _apply_corrections(segments: list, corrections: dict) -> list:
 
         # Term corrections only (case-insensitive) — fixes ASR errors
         for wrong, right in corrections.items():
+            text = re.sub(rf"\b{re.escape(wrong)}\b", right, text, flags=re.IGNORECASE)
+
+        # Context-dependent corrections, for errors whose wrong form is a real word
+        for pattern, replacement in CONTEXTUAL_CORRECTIONS:
+            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+
+        # Institution names
+        for wrong, right in _ORG_ALIASES.items():
             text = re.sub(rf"\b{re.escape(wrong)}\b", right, text, flags=re.IGNORECASE)
 
         # Extract normalized amounts as metadata (don't replace in text)

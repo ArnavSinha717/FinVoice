@@ -11,6 +11,12 @@ from loguru import logger
 # Default Ollama URL (can be overridden via .env)
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
+# Default extraction model. Must be a NON-REASONING model: via Ollama's
+# OpenAI-compatible endpoint, reasoning models (qwen3:*, qwen3.5:*) put their
+# chain-of-thought in a separate `reasoning` field, leave `content` empty, and
+# spend the whole token budget doing it. See pipeline/orchestrator.py.
+DEFAULT_MODEL = os.getenv("FINVOICE_LLM_MODEL", "qwen2.5:3b")
+
 
 def get_instructor_client(
     base_url: str | None = None,
@@ -35,7 +41,7 @@ def get_instructor_client(
 def extract_structured(
     prompt: str,
     response_model: type[BaseModel],
-    model: str = "qwen3:8b",
+    model: str = DEFAULT_MODEL,
     system_prompt: str | None = None,
     max_retries: int = 2,
     base_url: str | None = None,
@@ -80,7 +86,7 @@ def extract_structured(
 def extract_structured_batch(
     prompts: list[str],
     response_model: type[BaseModel],
-    model: str = "qwen3:8b",
+    model: str = DEFAULT_MODEL,
     system_prompt: str | None = None,
 ) -> list[BaseModel]:
     """Extract structured data from multiple prompts sequentially.
@@ -114,9 +120,10 @@ def extract_structured_batch(
 
 def extract_raw(
     prompt: str,
-    model: str = "qwen2.5:3b",
+    model: str = DEFAULT_MODEL,
     system_prompt: str | None = None,
     timeout: float = 60,
+    temperature: float | None = None,
 ) -> str:
     """Raw LLM completion — no Instructor, no schema validation.
 
@@ -136,14 +143,26 @@ def extract_raw(
     url = f"{OLLAMA_URL}/v1"
     client = OpenAI(base_url=url, api_key="ollama", timeout=timeout)
 
+    kwargs = {}
+    if temperature is not None:
+        kwargs["temperature"] = temperature
     response = client.chat.completions.create(
         model=model,
         messages=messages,
+        **kwargs,
     )
-    return response.choices[0].message.content or ""
+    msg = response.choices[0].message
+    content = msg.content or ""
+    if not content and getattr(msg, "reasoning", None):
+        logger.warning(
+            f"Model '{model}' returned only reasoning and no content — it is a "
+            f"reasoning model. Set FINVOICE_LLM_MODEL to a non-reasoning model "
+            f"(e.g. qwen2.5:3b)."
+        )
+    return content
 
 
-def preload_ollama_model(model: str = "qwen3:8b", keep_alive: str = "5m") -> bool:
+def preload_ollama_model(model: str = DEFAULT_MODEL, keep_alive: str = "5m") -> bool:
     """Pre-load an Ollama model into VRAM so first inference is fast.
 
     Sends a minimal generate request with keep_alive to warm the model.
@@ -164,7 +183,7 @@ def preload_ollama_model(model: str = "qwen3:8b", keep_alive: str = "5m") -> boo
         return False
 
 
-def unload_ollama_model(model: str = "qwen3:8b") -> None:
+def unload_ollama_model(model: str = DEFAULT_MODEL) -> None:
     """Force Ollama to release GPU memory for a model.
 
     CRITICAL on 6GB VRAM: Must call this before loading WhisperX.
@@ -194,3 +213,5 @@ def check_ollama_health() -> dict:
         return {"status": "error", "detail": f"HTTP {resp.status_code}"}
     except requests.ConnectionError:
         return {"status": "unreachable", "detail": f"Cannot connect to {OLLAMA_URL}"}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}

@@ -5,6 +5,7 @@ import json
 import uuid
 import threading
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 # PyTorch 2.8 compatibility patches — must run before any model imports
 import torch
@@ -47,23 +48,71 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import time as _time
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Depends
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
+from config.auth import require_api_key, log_status as log_auth_status
+from pipeline import call_index
 from services.llm.client import check_ollama_health
 from services.asr.transcriber import preload_whisperx, is_whisperx_loaded
 from pipeline.orchestrator import process_call
-from services.backboard.client import (
-    is_configured as backboard_configured,
-    query_customer_history,
-    query_audit_trail,
-    compliance_reasoning,
-    store_customer_interaction,
-)
+
+def _reconcile_orphaned_runs(output_dir: str = "data/processed") -> int:
+    """Fail any run that was in flight when the process died.
+
+    Pipeline runs live in daemon threads, so a restart kills them silently while
+    their progress file still says "processing". The dashboard then polls that call
+    forever with no error and no result. Anything still marked in-progress at
+    startup cannot be running, because nothing survived the restart.
+    """
+    progress_dir = Path(output_dir)
+    if not progress_dir.exists():
+        return 0
+
+    orphaned = 0
+    for f in progress_dir.glob("*_progress.json"):
+        try:
+            data = json.loads(f.read_text())
+            if data.get("status") != "processing":
+                continue
+            call_id = data.get("call_id") or f.name.split("_")[0]
+            if (progress_dir / f"{call_id}_record.json").exists():
+                data["status"] = "complete"   # finished but never flushed
+            else:
+                data["status"] = "error"
+                data["error"] = ("Pipeline was interrupted by a server restart. "
+                                 "Re-upload the call to process it again.")
+            f.write_text(json.dumps(data))
+            orphaned += 1
+        except Exception as e:
+            logger.warning(f"Could not reconcile {f.name}: {e}")
+
+    if orphaned:
+        logger.warning(f"Reconciled {orphaned} interrupted pipeline run(s) at startup")
+    return orphaned
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Load WhisperX at server start so the first call transcribes instantly."""
+    def _preload():
+        try:
+            preload_whisperx()
+        except Exception as e:
+            logger.warning(f"WhisperX preload failed (will load on first call): {e}")
+
+    log_auth_status()
+    _reconcile_orphaned_runs()
+    # Background thread so the server starts responding immediately
+    threading.Thread(target=_preload, daemon=True).start()
+    yield
+
 
 app = FastAPI(
+    lifespan=lifespan,
+    dependencies=[Depends(require_api_key)],
     title="FinVoice",
     description="Financial call intelligence pipeline — raw audio to structured, ML-trainable, audit-ready data",
     version="0.2.0",
@@ -73,23 +122,10 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-# ── Startup: preload WhisperX into GPU for instant transcription ──
-@app.on_event("startup")
-async def startup_preload():
-    """Load WhisperX at server start so first call transcribes instantly."""
-    def _preload():
-        try:
-            preload_whisperx()
-        except Exception as e:
-            logger.warning(f"WhisperX preload failed (will load on first call): {e}")
-    # Run in background thread so server starts responding immediately
-    threading.Thread(target=_preload, daemon=True).start()
 
 
 @app.get("/api/health")
@@ -130,7 +166,10 @@ async def process_audio(
     # Save uploaded file
     upload_dir = Path("data/raw_audio")
     upload_dir.mkdir(parents=True, exist_ok=True)
-    file_path = upload_dir / file.filename
+    safe_name = Path(file.filename or "upload").name
+    if not safe_name or safe_name in (".", ".."):
+        safe_name = "upload"
+    file_path = upload_dir / f"{uuid.uuid4().hex[:8]}_{safe_name}"
     with open(file_path, "wb") as f:
         content = await file.read()
         f.write(content)
@@ -270,9 +309,6 @@ async def get_transcript(call_id: str):
     with open(result_path) as f:
         data = json.load(f)
 
-    masked = False
-    # Check for masked=true query param (FastAPI auto-parses it from the request)
-    # We handle it inline since the endpoint already exists
     return {
         "call_id": call_id,
         "language": data.get("detected_language", data.get("language")),
@@ -457,6 +493,33 @@ async def get_stats():
     if not results_dir.exists():
         return {"total_calls": 0}
 
+    # Aggregate from the index when it is usable; fall back to scanning on any
+    # problem, because a stale index must degrade to slow, not to wrong.
+    if call_index.ensure_fresh(str(results_dir)):
+        try:
+            rows = call_index.query(
+                "SELECT overall_risk_level, compliance_score, duration_seconds, "
+                "language, requires_human_review FROM calls", (), str(results_dir))
+            risk_counts = {"low": 0, "medium": 0, "high": 0, "critical": 0}
+            languages: dict[str, int] = {}
+            total_compliance = total_duration = pending = 0
+            for r in rows:
+                risk_counts[r["overall_risk_level"]] = risk_counts.get(r["overall_risk_level"], 0) + 1
+                total_compliance += r["compliance_score"] or 0
+                total_duration += r["duration_seconds"] or 0
+                languages[r["language"]] = languages.get(r["language"], 0) + 1
+                pending += 1 if r["requires_human_review"] else 0
+            return {
+                "total_calls": len(rows),
+                "total_duration_seconds": round(total_duration, 1),
+                "avg_compliance_score": round(total_compliance / max(len(rows), 1), 1),
+                "risk_distribution": risk_counts,
+                "languages": languages,
+                "pending_reviews": pending,
+            }
+        except Exception as e:
+            logger.warning(f"Stats via index failed, scanning instead: {e}")
+
     files = list(results_dir.glob("*_record.json"))
     total = len(files)
 
@@ -465,6 +528,7 @@ async def get_stats():
     total_duration = 0
     languages = {}
 
+    pending_reviews = 0
     for f in files:
         try:
             with open(f) as fp:
@@ -475,15 +539,6 @@ async def get_stats():
             total_duration += data.get("duration_seconds", 0)
             lang = data.get("detected_language", data.get("language", "en"))
             languages[lang] = languages.get(lang, 0) + 1
-        except Exception:
-            continue
-
-    # Count pending reviews
-    pending_reviews = 0
-    for f in files:
-        try:
-            with open(f) as fp:
-                data = json.load(fp)
             if data.get("requires_human_review"):
                 pending_reviews += 1
         except Exception:
@@ -582,7 +637,7 @@ async def get_intents(call_id: str):
     # Enrich intents with utterance text from transcript segments
     intents = data.get("intents", [])
     segments = data.get("transcript_segments", [])
-    seg_map = {s["id"]: s for s in segments}
+    seg_map = {s.get("id", i): s for i, s in enumerate(segments)}
     enriched = []
     for intent in intents:
         seg = seg_map.get(intent.get("segment_id"))
@@ -671,6 +726,27 @@ async def get_review_queue():
     if not results_dir.exists():
         return {"items": [], "total": 0}
 
+    if call_index.ensure_fresh(str(results_dir)):
+        try:
+            rows = call_index.query(
+                "SELECT * FROM calls WHERE requires_human_review = 1 "
+                "ORDER BY review_priority ASC, mtime DESC", (), str(results_dir))
+            items = [{
+                "call_id": r["call_id"],
+                "review_priority": r["review_priority"],
+                "overall_risk_level": r["overall_risk_level"],
+                "call_summary": r["call_summary"],
+                "review_reasons": json.loads(r["review_reasons"] or "[]"),
+                "call_type": r["call_type"],
+                "language": r["language"],
+                "duration_seconds": r["duration_seconds"],
+                "compliance_score": r["compliance_score"],
+                "date": r["mtime"],
+            } for r in rows]
+            return {"items": items, "total": len(items)}
+        except Exception as e:
+            logger.warning(f"Review queue via index failed, scanning instead: {e}")
+
     items = []
     for f in results_dir.glob("*_record.json"):
         try:
@@ -693,71 +769,9 @@ async def get_review_queue():
         except Exception:
             continue
 
-    items.sort(key=lambda x: x.get("review_priority", 0), reverse=True)
+    # review_priority: 1 = urgent ... 5 = routine, so ascending puts urgent first
+    items.sort(key=lambda x: x.get("review_priority", 5))
     return {"items": items, "total": len(items)}
-
-
-# ── Backboard.io Endpoints ──
-
-@app.get("/api/backboard/status")
-async def backboard_status():
-    """Check if Backboard.io is configured and reachable."""
-    calls_stored = 0
-    results_dir = Path("data/processed")
-    if results_dir.exists():
-        calls_stored = len(list(results_dir.glob("*_record.json")))
-    return {
-        "configured": backboard_configured(),
-        "api_url": os.getenv("BACKBOARD_API_URL", "https://app.backboard.io/api"),
-        "calls_stored": calls_stored,
-    }
-
-
-@app.post("/api/customers/{customer_id}/query")
-async def customer_query(customer_id: str, body: dict):
-    """Query a customer's history across all their calls via Backboard memory.
-
-    Body: {"question": "What payment promises has this customer made?"}
-    """
-    question = body.get("question", "")
-    if not question:
-        raise HTTPException(status_code=400, detail="Missing 'question' field")
-
-    if not backboard_configured():
-        raise HTTPException(status_code=503, detail="Backboard not configured — set BACKBOARD_API_KEY")
-
-    answer = await query_customer_history(customer_id, question)
-    return {"customer_id": customer_id, "question": question, "answer": answer}
-
-
-@app.post("/api/customers/{customer_id}/link")
-async def link_call_to_customer(customer_id: str, body: dict):
-    """Link a processed call to a customer for cross-call tracking.
-
-    Body: {"call_id": "abc12345"}
-    """
-    call_id = body.get("call_id", "")
-    if not call_id:
-        raise HTTPException(status_code=400, detail="Missing 'call_id' field")
-
-    result_path = Path(f"data/processed/{call_id}_record.json")
-    if not result_path.exists():
-        raise HTTPException(status_code=404, detail=f"Call {call_id} not found")
-
-    if not backboard_configured():
-        raise HTTPException(status_code=503, detail="Backboard not configured")
-
-    import json
-    with open(result_path) as f:
-        call_record = json.load(f)
-
-    result = await store_customer_interaction(customer_id, call_record)
-    return {
-        "status": "linked",
-        "customer_id": customer_id,
-        "call_id": call_id,
-        "backboard_result": result,
-    }
 
 
 def _build_local_context(call_id: str | None = None) -> str:
@@ -832,7 +846,7 @@ def _build_local_context(call_id: str | None = None) -> str:
 
 @app.post("/api/audit/query")
 async def audit_query(body: dict):
-    """Query across ALL processed calls using Backboard's memory with local RAG context.
+    """Answer a question across all processed calls, using the local LLM over local records.
 
     Body: {"question": "Show me all calls with compliance violations", "call_id": "optional"}
     """
@@ -840,22 +854,22 @@ async def audit_query(body: dict):
     if not question:
         raise HTTPException(status_code=400, detail="Missing 'question' field")
 
-    if not backboard_configured():
-        raise HTTPException(status_code=503, detail="Backboard not configured")
-
     call_id = body.get("call_id")
     local_context = _build_local_context(call_id)
-    local_context = _build_local_context(call_id)
 
-    # Try local Ollama first (faster, full context control), fall back to Backboard
-    if local_context:
-        try:
-            answer = await _local_llm_query(question, local_context)
-            return {"question": question, "answer": answer}
-        except Exception as e:
-            logger.warning(f"Local LLM query failed ({e}), falling back to Backboard")
+    # Answered entirely locally: the context is assembled from processed records and
+    # passed to the local LLM, so no call data leaves the machine.
+    if not local_context:
+        raise HTTPException(
+            status_code=404,
+            detail="No processed calls to answer from. Upload and process a call first.",
+        )
 
-    answer = await query_audit_trail(question)
+    try:
+        answer = await _local_llm_query(question, local_context)
+    except Exception as e:
+        logger.error(f"Local LLM query failed: {e}")
+        raise HTTPException(status_code=503, detail=f"Local LLM unavailable: {e}")
     return {"question": question, "answer": answer}
 
 
@@ -892,7 +906,7 @@ async def _local_llm_query(question: str, context: str) -> str:
 
 @app.post("/api/compliance/reason")
 async def compliance_reason(body: dict):
-    """Tier 2 compliance: Use cloud LLM for nuanced compliance judgments.
+    """Explain a compliance finding in natural language, using the local LLM.
 
     Body: {
         "transcript_excerpt": "We may have to take further steps",
@@ -900,18 +914,23 @@ async def compliance_reason(body: dict):
         "regulation": "RBI Fair Practice Code"
     }
     """
-    excerpt = body.get("transcript_excerpt", "")
+    excerpt = body.get("transcript_excerpt") or body.get("excerpt") or ""
     context = body.get("context", "")
     regulation = body.get("regulation", "RBI Fair Practice Code")
 
     if not excerpt:
         raise HTTPException(status_code=400, detail="Missing 'transcript_excerpt' field")
 
-    if not backboard_configured():
-        raise HTTPException(status_code=503, detail="Backboard not configured")
-
-    result = await compliance_reasoning(excerpt, context, regulation)
-    return result
+    try:
+        reasoning = await _local_llm_query(
+            f"Under {regulation}, assess this call excerpt for compliance. "
+            f"State whether it is a violation, cite the specific principle, and keep it to 3 sentences.",
+            f"Excerpt: {excerpt}\nCall context: {context or 'not provided'}",
+        )
+        return {"reasoning": reasoning, "regulation": regulation, "source": "local"}
+    except Exception as e:
+        logger.warning(f"Compliance reasoning failed: {e}")
+        raise HTTPException(status_code=503, detail=f"Local LLM unavailable: {e}")
 
 
 if __name__ == "__main__":

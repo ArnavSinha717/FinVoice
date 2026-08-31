@@ -15,7 +15,7 @@ from loguru import logger
 _HAS_LANGDETECT = False
 
 try:
-    from langdetect import detect, DetectorFactory
+    from langdetect import detect, detect_langs, DetectorFactory
     # Make langdetect deterministic (it uses random sampling internally)
     DetectorFactory.seed = 0
     _HAS_LANGDETECT = True
@@ -25,6 +25,9 @@ except ImportError:
 
 # Minimum text length for reliable detection (short phrases are noisy)
 _MIN_TEXT_LENGTH = 15
+
+# Minimum langdetect probability before believing a non-fallback language.
+_MIN_CONFIDENCE = 0.85
 
 
 def tag_segment_languages(
@@ -71,9 +74,14 @@ def tag_segment_languages(
             continue
 
         try:
-            detected = detect(text)
-            # Normalize common langdetect codes
-            detected = _normalize_lang_code(detected)
+            # langdetect is unreliable on short, domain-specific utterances and will
+            # confidently mislabel English call fragments as Somali/French/German.
+            # Only accept a non-fallback language when it is high-confidence.
+            ranked = detect_langs(text)
+            best = ranked[0]
+            detected = _normalize_lang_code(best.lang)
+            if detected != fallback_lang and best.prob < _MIN_CONFIDENCE:
+                detected = fallback_lang
             seg["lang"] = detected
             lang_counts[detected] = lang_counts.get(detected, 0) + 1
         except Exception:

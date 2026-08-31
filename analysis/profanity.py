@@ -59,6 +59,9 @@ def detect_profanity(segments: list) -> list[ToxicityFlag]:
         List of ToxicityFlag objects for flagged segments
     """
     if not HAS_DETOXIFY:
+        from pipeline.degradations import report
+        report("toxicity", "detoxify not installed",
+               "toxicity_flags empty; agent_toxicity review reason never fires")
         return []
 
     model = _get_model()

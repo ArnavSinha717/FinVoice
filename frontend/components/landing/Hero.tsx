@@ -1,9 +1,31 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import TrybankSvg from './TrybankSvg';
+import { getStats, getHealth } from '@/lib/api';
 
 export default function Hero() {
+  // These were hardcoded to 1,247 calls and 81.4% compliance while the dashboard
+  // one click away showed the real figures. On a landing page for a compliance
+  // product, inventing your own numbers is a bad look — read the real ones, and
+  // show a dash until they arrive rather than a placeholder that looks like data.
+  const [stats, setStats] = useState<{ calls: number; compliance: number } | null>(null);
+
+  useEffect(() => {
+    // getStats() swallows fetch failures and returns zeros, so an unreachable
+    // backend would render as a confident "0 calls". Confirm the API is actually
+    // up before trusting the numbers; otherwise show a dash.
+    let cancelled = false;
+    (async () => {
+      const health = await getHealth();
+      if (cancelled || !health) return;
+      const s = await getStats();
+      if (!cancelled) setStats({ calls: s.totalCalls, compliance: s.avgCompliance });
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   return (
     <section className="hero-redesigned" id="hero">
       <div className="hero-glow" />
@@ -37,11 +59,15 @@ export default function Hero() {
             </div>
             <div className="hero-stats-row">
               <div className="hero-stat">
-                <span className="hero-stat-val">1,247</span>
+                <span className="hero-stat-val">
+                  {stats ? stats.calls.toLocaleString('en-IN') : '—'}
+                </span>
                 <span className="hero-stat-label">Calls Processed</span>
               </div>
               <div className="hero-stat">
-                <span className="hero-stat-val">81.4%</span>
+                <span className="hero-stat-val">
+                  {stats ? `${stats.compliance.toFixed(1)}%` : '—'}
+                </span>
                 <span className="hero-stat-label">Avg Compliance</span>
               </div>
               <div className="hero-stat">

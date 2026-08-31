@@ -29,93 +29,100 @@
     "कैसे हो"
   ],
   "trivial_phrases": [
-    "हाँ",
-    "हां",
-    "जी",
-    "जी हाँ",
-    "जी नहीं",
-    "नहीं",
-    "ठीक है",
-    "ठीक",
+    "hello",
+    "hi",
+    "no",
+    "okay",
+    "thank you",
+    "thanks",
+    "yes",
     "अच्छा",
-    "सही",
-    "बिल्कुल",
-    "धन्यवाद",
-    "शुक्रिया",
-    "ओके",
-    "समझ गया",
-    "समझ गयी",
-    "हाँ जी",
-    "जी बिल्कुल",
-    "जी सर",
-    "जी मैडम",
-    "बहुत अच्छा",
-    "बहुत बढ़िया",
-    "ज़रूर",
-    "बिल्कुल सही",
-    "सही बात",
-    "सही है",
-    "पता है",
-    "मालूम है",
-    "समझ आ गया",
-    "क्लियर है",
-    "हाँ समझ गया",
-    "ठीक है सर",
-    "ठीक है मैडम",
-    "जी ठीक है",
+    "अच्छा चलिए",
     "अच्छा जी",
-    "हां जी बिल्कुल",
-    "जी हां सर",
-    "नहीं सर",
-    "नहीं मैडम",
-    "जी नहीं सर",
-    "हां बिल्कुल",
-    "बिल्कुल सर",
-    "ज़रूर सर",
-    "बता दीजिए",
-    "बोलिए",
-    "सुन रहा हूं",
-    "सुन रहे हैं",
-    "हां बताइए",
-    "जी बताइए",
-    "हां बोलिए",
-    "जी बोलिए",
-    "एक मिनट",
-    "रुकिए",
-    "बस एक मिनट",
-    "ज़रा रुकिए",
-    "पक्का",
-    "यकीनन",
-    "बेशक",
-    "अवश्य",
-    "ज़रूर करूंगा",
-    "कर दूंगा",
-    "कर दूंगी",
-    "भेज दूंगा",
-    "भेज दूंगी",
-    "हां कर दूंगा",
-    "जी कर देंगे",
+    "अच्छा बाय",
     "अभी करता हूं",
     "अलविदा",
-    "नमस्ते",
-    "धन्यवाद सर",
-    "धन्यवाद मैडम",
-    "शुक्रिया सर",
-    "शुक्रिया मैडम",
-    "बहुत धन्यवाद",
-    "बहुत शुक्रिया",
-    "चलिए फिर",
-    "अच्छा चलिए",
-    "ठीक है बाय",
-    "अच्छा बाय",
-    "नमस्ते बाय",
+    "अवश्य",
+    "एक मिनट",
+    "ओके",
+    "कर दूंगा",
+    "कर दूंगी",
     "कृपया",
-    "प्लीज",
-    "मेहरबानी",
     "कृपया बताइए",
-    "प्लीज सर",
     "कृपया सर",
-    "दया करके"
+    "क्लियर है",
+    "चलिए फिर",
+    "ज़रा रुकिए",
+    "ज़रूर",
+    "ज़रूर करूंगा",
+    "ज़रूर सर",
+    "जी",
+    "जी कर देंगे",
+    "जी ठीक है",
+    "जी नहीं",
+    "जी नहीं सर",
+    "जी बताइए",
+    "जी बिल्कुल",
+    "जी बोलिए",
+    "जी मैडम",
+    "जी सर",
+    "जी हाँ",
+    "जी हां सर",
+    "ठीक",
+    "ठीक है",
+    "ठीक है बाय",
+    "ठीक है मैडम",
+    "ठीक है सर",
+    "दया करके",
+    "धन्यवाद",
+    "धन्यवाद मैडम",
+    "धन्यवाद सर",
+    "नमस्ते",
+    "नमस्ते बाय",
+    "नहीं",
+    "नहीं मैडम",
+    "नहीं सर",
+    "पक्का",
+    "पता है",
+    "प्लीज",
+    "प्लीज सर",
+    "बता दीजिए",
+    "बस एक मिनट",
+    "बहुत अच्छा",
+    "बहुत धन्यवाद",
+    "बहुत बढ़िया",
+    "बहुत शुक्रिया",
+    "बिल्कुल",
+    "बिल्कुल सर",
+    "बिल्कुल सही",
+    "बेशक",
+    "बोलिए",
+    "भेज दूंगा",
+    "भेज दूंगी",
+    "मालूम है",
+    "मेहरबानी",
+    "यकीनन",
+    "रुकिए",
+    "शुक्रिया",
+    "शुक्रिया मैडम",
+    "शुक्रिया सर",
+    "समझ आ गया",
+    "समझ गया",
+    "समझ गयी",
+    "सही",
+    "सही बात",
+    "सही है",
+    "सुन रहा हूं",
+    "सुन रहे हैं",
+    "हाँ",
+    "हाँ जी",
+    "हाँ समझ गया",
+    "हां",
+    "हां कर दूंगा",
+    "हां जी बिल्कुल",
+    "हां बताइए",
+    "हां बिल्कुल",
+    "हां बोलिए"
   ],
   "currency_words": [
     {
@@ -123,25 +130,49 @@
         "रुपये",
         "रुपया",
         "रुपए",
-        "रू"
+        "रू",
+        "रुपे",
+        "रुप्ये",
+        "रूपये",
+        "रूपए",
+        "रुपइया",
+        "रुपईया",
+        "रुपइये",
+        "रुपैया",
+        "rupaye",
+        "rupay",
+        "rupees",
+        "rupee"
       ],
       "currency": "INR"
     },
     {
       "words": [
-        "लाख"
+        "लाख",
+        "लाख़",
+        "लाक",
+        "lakh",
+        "lac"
       ],
       "currency": "INR_LAKH"
     },
     {
       "words": [
-        "करोड़"
+        "करोड़",
+        "करोड",
+        "करोर",
+        "crore",
+        "cr"
       ],
       "currency": "INR_CRORE"
     },
     {
       "words": [
-        "हजार"
+        "हजार",
+        "हज़ार",
+        "hazaar",
+        "hazar",
+        "thousand"
       ],
       "currency": "INR_THOUSAND"
     }
@@ -190,7 +221,17 @@
           "मैं कॉल कर रहा",
           "मैं बोल रही",
           "हम कॉल कर रहे",
-          "मैं फोन कर रहा"
+          "मैं फोन कर रहा",
+          "बोल रही",
+          "बोल रहा",
+          "बात कर रही",
+          "बात कर रहा",
+          "मैं हूँ",
+          "calling from",
+          "this is",
+          "speaking from",
+          "से बोल",
+          "financial services"
         ],
         "regulation": "RBI_Fair_Practice_Code_Section_4"
       },
@@ -205,7 +246,15 @@
           "आपकी पेमेंट",
           "लोन अकाउंट",
           "आपके खाते में",
-          "बकाया भुगतान"
+          "बकाया भुगतान",
+          "के बारे में",
+          "के संबंध में",
+          "loan account",
+          "personal loan",
+          "आपके लोन",
+          "आपके account",
+          "regarding your",
+          "about your"
         ],
         "regulation": "RBI_Fair_Practice_Code_Section_4"
       },
@@ -216,7 +265,15 @@
           "गुणवत्ता",
           "यह कॉल रिकॉर्ड",
           "रिकॉर्डिंग",
-          "क्वालिटी और ट्रेनिंग"
+          "क्वालिटी और ट्रेनिंग",
+          "call recording",
+          "recording",
+          "रिकॉर्ड",
+          "record की जा रही",
+          "record किया जा रहा",
+          "recorded",
+          "गुणवत्ता के लिए",
+          "quality"
         ],
         "regulation": "IT_Act_2000_Section_43A"
       },
@@ -228,7 +285,17 @@
           "पास्ट ड्यू",
           "लेट पेमेंट",
           "डिफॉल्ट",
-          "अतिदेय"
+          "अतिदेय",
+          "आउटस्टांडिंग",
+          "outstanding",
+          "बकाया",
+          "late fee",
+          "लेट फी",
+          "overdue",
+          "due",
+          "ड्यू",
+          "payment",
+          "पेमेंट"
         ],
         "regulation": "RBI_Fair_Practice_Code_Section_8"
       }
@@ -271,6 +338,62 @@
           "पुनः सत्यापन"
         ],
         "regulation": "RBI_KYC_Master_Direction_Section_38"
+      },
+      "caller_identification": {
+        "keywords": [
+          "बोल रही",
+          "बोल रहा",
+          "बात कर रही",
+          "बात कर रहा",
+          "मैं हूँ",
+          "calling from",
+          "this is",
+          "speaking from",
+          "से बोल",
+          "financial services"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_4"
+      },
+      "purpose_disclosure": {
+        "keywords": [
+          "के बारे में",
+          "के संबंध में",
+          "loan account",
+          "personal loan",
+          "आपके लोन",
+          "आपके account",
+          "regarding your",
+          "about your"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_4"
+      },
+      "recording_consent": {
+        "keywords": [
+          "call recording",
+          "recording",
+          "रिकॉर्ड",
+          "record की जा रही",
+          "record किया जा रहा",
+          "recorded",
+          "गुणवत्ता के लिए",
+          "quality"
+        ],
+        "regulation": "IT_Act_2000_Section_43A"
+      },
+      "mini_miranda": {
+        "keywords": [
+          "आउटस्टांडिंग",
+          "outstanding",
+          "बकाया",
+          "late fee",
+          "लेट फी",
+          "overdue",
+          "due",
+          "ड्यू",
+          "payment",
+          "पेमेंट"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_8"
       }
     },
     "consent": {
@@ -305,6 +428,62 @@
           "विचार बदल सकते"
         ],
         "regulation": "RBI_Digital_Lending_Guidelines_Section_6"
+      },
+      "caller_identification": {
+        "keywords": [
+          "बोल रही",
+          "बोल रहा",
+          "बात कर रही",
+          "बात कर रहा",
+          "मैं हूँ",
+          "calling from",
+          "this is",
+          "speaking from",
+          "से बोल",
+          "financial services"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_4"
+      },
+      "purpose_disclosure": {
+        "keywords": [
+          "के बारे में",
+          "के संबंध में",
+          "loan account",
+          "personal loan",
+          "आपके लोन",
+          "आपके account",
+          "regarding your",
+          "about your"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_4"
+      },
+      "recording_consent": {
+        "keywords": [
+          "call recording",
+          "recording",
+          "रिकॉर्ड",
+          "record की जा रही",
+          "record किया जा रहा",
+          "recorded",
+          "गुणवत्ता के लिए",
+          "quality"
+        ],
+        "regulation": "IT_Act_2000_Section_43A"
+      },
+      "mini_miranda": {
+        "keywords": [
+          "आउटस्टांडिंग",
+          "outstanding",
+          "बकाया",
+          "late fee",
+          "लेट फी",
+          "overdue",
+          "due",
+          "ड्यू",
+          "payment",
+          "पेमेंट"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_8"
       }
     },
     "onboarding": {
@@ -313,7 +492,17 @@
           "मेरा नाम",
           "बैंक से",
           "स्वागत है",
-          "चुनने के लिए धन्यवाद"
+          "चुनने के लिए धन्यवाद",
+          "बोल रही",
+          "बोल रहा",
+          "बात कर रही",
+          "बात कर रहा",
+          "मैं हूँ",
+          "calling from",
+          "this is",
+          "speaking from",
+          "से बोल",
+          "financial services"
         ],
         "regulation": "RBI_Fair_Practice_Code_Section_4"
       },
@@ -340,6 +529,47 @@
           "समाधान"
         ],
         "regulation": "RBI_Integrated_Ombudsman_Scheme_2021"
+      },
+      "purpose_disclosure": {
+        "keywords": [
+          "के बारे में",
+          "के संबंध में",
+          "loan account",
+          "personal loan",
+          "आपके लोन",
+          "आपके account",
+          "regarding your",
+          "about your"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_4"
+      },
+      "recording_consent": {
+        "keywords": [
+          "call recording",
+          "recording",
+          "रिकॉर्ड",
+          "record की जा रही",
+          "record किया जा रहा",
+          "recorded",
+          "गुणवत्ता के लिए",
+          "quality"
+        ],
+        "regulation": "IT_Act_2000_Section_43A"
+      },
+      "mini_miranda": {
+        "keywords": [
+          "आउटस्टांडिंग",
+          "outstanding",
+          "बकाया",
+          "late fee",
+          "लेट फी",
+          "overdue",
+          "due",
+          "ड्यू",
+          "payment",
+          "पेमेंट"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_8"
       }
     },
     "complaint": {
@@ -347,7 +577,17 @@
         "keywords": [
           "मेरा नाम",
           "मैं बोल रहा",
-          "बैंक से"
+          "बैंक से",
+          "बोल रही",
+          "बोल रहा",
+          "बात कर रही",
+          "बात कर रहा",
+          "मैं हूँ",
+          "calling from",
+          "this is",
+          "speaking from",
+          "से बोल",
+          "financial services"
         ],
         "regulation": "RBI_Fair_Practice_Code_Section_4"
       },
@@ -383,6 +623,47 @@
           "उच्च अधिकारी"
         ],
         "regulation": "RBI_Integrated_Ombudsman_Scheme_2021"
+      },
+      "purpose_disclosure": {
+        "keywords": [
+          "के बारे में",
+          "के संबंध में",
+          "loan account",
+          "personal loan",
+          "आपके लोन",
+          "आपके account",
+          "regarding your",
+          "about your"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_4"
+      },
+      "recording_consent": {
+        "keywords": [
+          "call recording",
+          "recording",
+          "रिकॉर्ड",
+          "record की जा रही",
+          "record किया जा रहा",
+          "recorded",
+          "गुणवत्ता के लिए",
+          "quality"
+        ],
+        "regulation": "IT_Act_2000_Section_43A"
+      },
+      "mini_miranda": {
+        "keywords": [
+          "आउटस्टांडिंग",
+          "outstanding",
+          "बकाया",
+          "late fee",
+          "लेट फी",
+          "overdue",
+          "due",
+          "ड्यू",
+          "payment",
+          "पेमेंट"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_8"
       }
     },
     "general": {
@@ -391,7 +672,17 @@
           "मेरा नाम",
           "मैं बोल रहा",
           "बैंक से",
-          "कंपनी से"
+          "कंपनी से",
+          "बोल रही",
+          "बोल रहा",
+          "बात कर रही",
+          "बात कर रहा",
+          "मैं हूँ",
+          "calling from",
+          "this is",
+          "speaking from",
+          "से बोल",
+          "financial services"
         ],
         "regulation": "RBI_Fair_Practice_Code_Section_4"
       },
@@ -399,9 +690,45 @@
         "keywords": [
           "कॉल रिकॉर्ड",
           "रिकॉर्ड किया जा रहा",
-          "गुणवत्ता और प्रशिक्षण"
+          "गुणवत्ता और प्रशिक्षण",
+          "call recording",
+          "recording",
+          "रिकॉर्ड",
+          "record की जा रही",
+          "record किया जा रहा",
+          "recorded",
+          "गुणवत्ता के लिए",
+          "quality"
         ],
         "regulation": "IT_Act_2000_Section_43A"
+      },
+      "purpose_disclosure": {
+        "keywords": [
+          "के बारे में",
+          "के संबंध में",
+          "loan account",
+          "personal loan",
+          "आपके लोन",
+          "आपके account",
+          "regarding your",
+          "about your"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_4"
+      },
+      "mini_miranda": {
+        "keywords": [
+          "आउटस्टांडिंग",
+          "outstanding",
+          "बकाया",
+          "late fee",
+          "लेट फी",
+          "overdue",
+          "due",
+          "ड्यू",
+          "payment",
+          "पेमेंट"
+        ],
+        "regulation": "RBI_Fair_Practice_Code_Section_8"
       }
     }
   },

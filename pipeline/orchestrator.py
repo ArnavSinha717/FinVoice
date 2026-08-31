@@ -15,6 +15,7 @@ import re
 import json
 import uuid
 import time
+import threading
 import torch
 from pathlib import Path
 from typing import Callable, Optional
@@ -24,8 +25,9 @@ from loguru import logger
 from services.audio.normalizer import normalize_audio
 from services.audio.quality import assess_audio_quality
 from services.audio.cleanup import cleanup_audio
-from services.asr.transcriber import transcribe_audio, unload_whisperx, reload_whisperx
-from services.llm.client import extract_structured, extract_raw, unload_ollama_model
+from services.asr.transcriber import transcribe_audio
+from services.llm.client import extract_structured, extract_raw
+from pipeline import degradations, numeric_guard, call_index
 from analysis.intelligence import extract_all_entities_layer1
 from analysis.compliance import run_compliance_checks
 from analysis.fraud_detection import run_fraud_detection, refine_fraud_with_emotions
@@ -43,10 +45,6 @@ from analysis.sentiment import (
 from config.schemas import (
     CallRecord, UtteranceIntent, FinancialEntity, Obligation,
     ComplianceCheck, FraudSignal, CallIntent, RiskLevel,
-)
-from services.backboard.client import (
-    is_configured as backboard_configured,
-    store_call_record_sync,
 )
 
 def _write_progress(call_id: str, output_dir: str, stage: str, stage_name: str,
@@ -87,15 +85,25 @@ LANGUAGE_NAMES = {
 }
 
 
-def _get_llm_model(lang: str) -> str:
-    """Select LLM model based on detected language.
+# One model for every language. Reasoning models (qwen3:8b, qwen3.5:4b) are
+# deliberately NOT used here: through Ollama's OpenAI-compatible endpoint their
+# chain-of-thought goes to a separate `reasoning` field and `content` comes back
+# empty, while burning the token budget. Measured on a 6 GB RTX 3060:
+#
+#   qwen3:8b     70s for a trivial prompt, 354s for a real one -> exceeds the
+#                45s call timeouts below, so every non-English call silently
+#                fell back to keyword matching.
+#   qwen2.5:3b   12.7s on the same Hindi/code-switched extraction, 3/3 obligations.
+#
+# qwen2.5:3b is also 2.2 GB rather than 5.2 GB, so it coexists with WhisperX
+# (~1.2 GB) inside 6 GB — which is why the load/unload choreography is gone.
+# Override with FINVOICE_LLM_MODEL if you have more VRAM.
+DEFAULT_LLM_MODEL = os.getenv("FINVOICE_LLM_MODEL", "qwen2.5:3b")
 
-    English → qwen2.5:3b (faster, lighter, sufficient since FinBERT handles most work).
-    Non-English → qwen3:8b (stronger multilingual, better code-switching understanding).
-    """
-    if lang == "en":
-        return "qwen2.5:3b"
-    return "qwen3:8b"
+
+def _get_llm_model(lang: str) -> str:
+    """LLM used for extraction. Language-independent — see DEFAULT_LLM_MODEL."""
+    return DEFAULT_LLM_MODEL
 
 
 # Few-shot examples for Hindi/Tamil code-switched financial text
@@ -152,7 +160,24 @@ def _get_few_shot_examples(lang: str, task: str = "intent") -> str:
     return ""
 
 
-def process_call(
+# Only one call may occupy the GPU pipeline at a time. Concurrent uploads OOM a 6GB
+# card, and unload_whisperx() in one thread nulls the model another is mid-transcribe on.
+_PIPELINE_LOCK = threading.Semaphore(1)
+
+
+def process_call(*args, **kwargs) -> CallRecord:
+    """Serialized entry point — see _process_call_inner for the pipeline itself."""
+    acquired = _PIPELINE_LOCK.acquire(blocking=False)
+    if not acquired:
+        logger.info("GPU pipeline busy — queued behind the running call")
+        _PIPELINE_LOCK.acquire()
+    try:
+        return _process_call_inner(*args, **kwargs)
+    finally:
+        _PIPELINE_LOCK.release()
+
+
+def _process_call_inner(
     input_audio_path: str,
     call_type: str = "general",
     hf_token: str | None = None,
@@ -177,6 +202,7 @@ def process_call(
     """
     call_id = call_id or str(uuid.uuid4())[:8]
     hf_token = hf_token or os.getenv("HF_TOKEN")
+    degradations.reset()
     logger.info(f"[{call_id}] Starting pipeline for {input_audio_path}")
     completed: list[str] = []
     stage_times: dict[str, float] = {}
@@ -226,7 +252,8 @@ def process_call(
         "audio_quality_flag": quality.get("quality_flag", "UNKNOWN"),
         "audio_snr_db": round(quality.get("snr_db", 0), 1),
         "audio_speech_pct": round(quality.get("speech_percentage", 0), 1),
-        "audio_duration": round(quality.get("duration", 0), 1),
+        # assess_audio_quality() does not report duration — take it from Stage 1
+        "audio_duration": round(audio_meta.get("original_duration", 0), 1),
         "audio_quality_components": quality.get("component_scores", {}),
     })
 
@@ -258,9 +285,8 @@ def process_call(
         language=None,  # Auto-detect language
         hf_token=hf_token,
     )
-    # Unload WhisperX to free VRAM for emotion2vec + Ollama
-    unload_whisperx()
-    logger.info(f"[{call_id}] WhisperX unloaded — VRAM free for analysis stages")
+    # WhisperX (~1.2 GB) and qwen2.5:3b (~2.2 GB) fit together in 6 GB, so the
+    # model stays resident instead of being unloaded and reloaded every call.
 
     segments = transcript["segments"]
     detected_lang = transcript.get("language", "en")
@@ -317,29 +343,80 @@ def process_call(
 
     # emotion2vec wrapper — runs on GPU thread, unloads when done
     def _run_emotion2vec():
-        from services.emotion.emotion2vec_analyzer import analyze_emotions, get_emotion_summary, unload_model as unload_emotion2vec
+        from services.emotion.emotion2vec_analyzer import (
+            analyze_emotions, get_emotion_summary, unload_model as unload_emotion2vec,
+        )
         emotions = analyze_emotions(wav_path, segments, audio_array=audio_array, sample_rate=audio_sr)
         summary = get_emotion_summary(emotions)
-        # Free emotion2vec VRAM immediately so Ollama can preload
-        unload_emotion2vec()
-        torch.cuda.empty_cache()
+
+        # Unloading after every call is a habit from when qwen3:8b took 5.2 GB of a
+        # 6 GB card and nothing could stay resident. With qwen2.5:3b there is
+        # headroom, and reloading a ~1.2 GB model per call was costing ~20s of the
+        # analyzer's runtime. Keep it resident unless VRAM is genuinely tight.
+        if os.getenv("FINVOICE_EMOTION_KEEP_RESIDENT", "1") == "0":
+            unload_emotion2vec()
+            torch.cuda.empty_cache()
+        else:
+            try:
+                free_mb = torch.cuda.mem_get_info()[0] // (1024 ** 2) if torch.cuda.is_available() else 0
+                if 0 < free_mb < 900:
+                    logger.info(f"Unloading emotion2vec — only {free_mb} MiB VRAM free")
+                    unload_emotion2vec()
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
         return emotions, summary
+
+    # Per-analyzer wall time, surfaced in pipeline_timings as "Stage 4/<name>".
+    # Lets an evaluation harness attribute cost per component, and makes a stalled
+    # analyzer visible instead of hiding inside one aggregate stage number.
+    analyzer_times: dict[str, float] = {}
+
+    def _run_prohibited_semantic(segs, ctype):
+        """Tier-2 paraphrase-aware prohibited-conduct check (LLM judge)."""
+        from analysis.prohibited_semantic import detect_prohibited_semantic
+        return detect_prohibited_semantic(segs, ctype)
+
+    def _timed(name: str, fn):
+        """Wrap an analyzer so its wall time is recorded even when it raises."""
+        def inner(*args, **kwargs):
+            t0 = time.perf_counter()
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                analyzer_times[name] = round(time.perf_counter() - t0, 2)
+        return inner
+
+    def _collect(name: str, future, default, impact: str):
+        """Resolve an analyzer future, attributing failure instead of swallowing it.
+
+        Previously each analyzer's except-branch returned an empty default and only
+        logged, so a crashed analyzer was indistinguishable from one that genuinely
+        found nothing — which is how a NameError in the compliance rules produced a
+        record with zero checks and a 100/100 compliance score.
+        """
+        try:
+            return future.result()
+        except Exception as e:
+            logger.error(f"[{call_id}] {name} failed: {type(e).__name__}: {e}")
+            degradations.report(name, f"raised {type(e).__name__}: {e}", impact)
+            return default
 
     # ── PARALLEL: CPU stages (4A-4G) + GPU emotion2vec (4H) + Ollama preload ──
     with ThreadPoolExecutor(max_workers=10) as pool:
         logger.info(f"[{call_id}] Running stages 4A-4H in parallel (CPU + GPU)")
 
         # CPU stages
-        f_sentiment = pool.submit(compute_sentiment_trajectories, segments, detected_lang)
-        f_entities = pool.submit(extract_all_entities_layer1, segments, detected_lang)
-        f_compliance = pool.submit(run_compliance_checks, segments, call_type, detected_lang)
-        f_fraud = pool.submit(run_fraud_detection, wav_path, segments)
-        f_pii = pool.submit(detect_pii, segments, 0.5, detected_lang)
-        f_profanity = pool.submit(detect_profanity, segments)
-        f_tamper = pool.submit(run_tamper_detection, wav_path, source_codec=audio_meta.get("original_format", ""))
+        f_sentiment = pool.submit(_timed("sentiment", compute_sentiment_trajectories), segments, detected_lang)
+        f_entities = pool.submit(_timed("entities", extract_all_entities_layer1), segments, detected_lang)
+        f_compliance = pool.submit(_timed("compliance", run_compliance_checks), segments, call_type, detected_lang)
+        f_fraud = pool.submit(_timed("fraud", run_fraud_detection), wav_path, segments)
+        f_pii = pool.submit(_timed("pii", detect_pii), segments, 0.5, detected_lang)
+        f_profanity = pool.submit(_timed("toxicity", detect_profanity), segments)
+        f_tamper = pool.submit(_timed("tamper", run_tamper_detection), wav_path, source_codec=audio_meta.get("original_format", ""))
 
         # GPU stage — runs simultaneously since CPU stages don't use GPU
-        f_emotion = pool.submit(_run_emotion2vec)
+        f_emotion = pool.submit(_timed("emotion2vec", _run_emotion2vec))
 
         # Preload Ollama AFTER emotion2vec finishes — they share GPU VRAM.
         # Use a callback on the emotion2vec future to trigger the preload.
@@ -353,62 +430,56 @@ def process_call(
         ollama_preload_future = pool.submit(_chain_ollama_preload, f_emotion)
 
         # Collect results — each stage is independent
-        try:
-            customer_sentiment, agent_sentiment = f_sentiment.result()
-            customer_emotion = get_dominant_emotion(customer_sentiment)
-            sentiment_context = interpret_sentiment_context(
-                customer_sentiment, agent_sentiment, call_type
-            )
-        except Exception as e:
-            logger.error(f"[{call_id}] Sentiment failed: {e}")
-            customer_sentiment, agent_sentiment = [], []
-            customer_emotion = "neutral"
-            sentiment_context = {}
+        sentiment_pair = _collect(
+            "sentiment", f_sentiment, ([], []),
+            "customer/agent sentiment trajectories empty; escalation detection weakened")
+        customer_sentiment, agent_sentiment = sentiment_pair
+        customer_emotion = get_dominant_emotion(customer_sentiment) if customer_sentiment else "neutral"
+        sentiment_context = (
+            interpret_sentiment_context(customer_sentiment, agent_sentiment, call_type)
+            if customer_sentiment or agent_sentiment else {}
+        )
 
-        try:
-            layer1_entities = f_entities.result()
-        except Exception as e:
-            logger.error(f"[{call_id}] Entity extraction failed: {e}")
-            layer1_entities = []
+        f_prohibited = pool.submit(
+            _timed("prohibited_semantic", _run_prohibited_semantic), segments, call_type)
 
-        try:
-            compliance_checks = f_compliance.result()
-        except Exception as e:
-            logger.error(f"[{call_id}] Compliance checks failed: {e}")
-            compliance_checks = []
-
-        try:
-            fraud_signals = f_fraud.result()
-        except Exception as e:
-            logger.error(f"[{call_id}] Fraud detection failed: {e}")
-            fraud_signals = []
-
-        try:
-            pii_entities = f_pii.result()
-        except Exception as e:
-            logger.error(f"[{call_id}] PII detection failed: {e}")
-            pii_entities = []
-
-        try:
-            toxicity_flags = f_profanity.result()
-        except Exception as e:
-            logger.error(f"[{call_id}] Profanity detection failed: {e}")
-            toxicity_flags = []
-
-        try:
-            tamper_signals = f_tamper.result()
-        except Exception as e:
-            logger.error(f"[{call_id}] Tamper detection failed: {e}")
-            tamper_signals = []
+        layer1_entities = _collect(
+            "entities", f_entities, [],
+            "no regex/spaCy financial entities; only LLM-extracted entities remain")
+        compliance_checks = _collect(
+            "compliance", f_compliance, [],
+            "no compliance checks ran — compliance_score is meaningless, not perfect")
+        fraud_signals = _collect(
+            "fraud", f_fraud, [],
+            "no fraud signals; overall_risk_level understated")
+        pii_entities = _collect(
+            "pii", f_pii, [],
+            "no PII detected or masked; masked transcript export is unredacted")
+        toxicity_flags = _collect(
+            "toxicity", f_profanity, [],
+            "no toxicity flags; agent_toxicity review reason never fires")
+        tamper_signals = _collect(
+            "tamper", f_tamper, [],
+            "no tamper signals; tamper_risk reports 'none' regardless of the audio")
+        semantic_violations = _collect(
+            "prohibited_semantic", f_prohibited, [],
+            "paraphrased threats and coercion are not detected; only literal "
+            "vocabulary matches are caught")
+        if semantic_violations:
+            existing = {c.check_name for c in compliance_checks}
+            compliance_checks.extend(
+                c for c in semantic_violations if c.check_name not in existing)
 
         # Collect emotion2vec results (GPU, ran in parallel with CPU stages)
         segment_emotions = []
         emotion_distribution = {}
         speaker_emotion_breakdown = {}
         emotion_transitions = []
+        escalation_moments = []
         try:
             segment_emotions, emotion_summary = f_emotion.result()
             emotion_distribution = emotion_summary.get("emotion_distribution", {})
+            escalation_moments = emotion_summary.get("escalation_moments", [])
             # Per-speaker emotion breakdown + transition detection
             if segment_emotions:
                 from services.emotion.emotion2vec_analyzer import get_speaker_emotion_breakdown, detect_emotion_transitions
@@ -416,6 +487,9 @@ def process_call(
                 emotion_transitions = detect_emotion_transitions(segment_emotions)
         except Exception as e:
             logger.warning(f"[{call_id}] emotion2vec failed (continuing without): {e}")
+            degradations.report(
+                "emotion2vec", f"raised {type(e).__name__}: {e}",
+                "segment_emotions and all derived emotion fields are empty")
 
     logger.info(f"[{call_id}] Parallel stages complete (CPU + GPU)")
     completed.extend(["4A", "4B", "4C", "4D", "4E", "4F", "4G", "4H"])
@@ -465,14 +539,6 @@ def process_call(
             all_entities, intents, segments, call_type,
             call_summary, key_outcomes, detected_lang,
         )
-        # Skip to VRAM cleanup
-        try:
-            unload_ollama_model(_get_llm_model(detected_lang))
-        except Exception:
-            pass
-        _reload_future = None
-        with ThreadPoolExecutor(max_workers=1) as reload_pool:
-            _reload_future = reload_pool.submit(reload_whisperx)
         completed.append("4I")
         _stage_timer("Stage 5: Output")
         _progress("5", "Generating output")
@@ -519,17 +585,6 @@ def process_call(
             all_entities, intents, segments, call_type,
             call_summary, key_outcomes, detected_lang,
         )
-
-        # Free Ollama VRAM, then reload WhisperX for next call
-        try:
-            unload_ollama_model(_get_llm_model(detected_lang))
-        except Exception:
-            pass
-
-        # Reload WhisperX into GPU — ready for the next call instantly.
-        _reload_future = None
-        with ThreadPoolExecutor(max_workers=1) as reload_pool:
-            _reload_future = reload_pool.submit(reload_whisperx)
 
         completed.append("4I")
         _stage_timer("Stage 5: Output")
@@ -639,6 +694,55 @@ def process_call(
             ]
         transcript_segments.append(seg_out)
 
+    # ── Numeric guard ──
+    # Strip any figure the extraction layer cannot vouch for, and compute derived
+    # totals here rather than trusting the model with arithmetic. See
+    # pipeline/numeric_guard.py for why this is enforced in code.
+    _ent_dicts = [e.model_dump() if hasattr(e, "model_dump") else e for e in all_entities]
+
+    # Drop any prompt scaffolding the model echoed back rather than filling in.
+    call_summary = numeric_guard.strip_placeholders(call_summary)
+    key_outcomes = [x for x in (numeric_guard.strip_placeholders(o) for o in key_outcomes) if x]
+    next_actions = [x for x in (numeric_guard.strip_placeholders(a) for a in next_actions) if x]
+
+    call_summary, key_outcomes, next_actions, _num_audit = numeric_guard.scrub_all(
+        call_summary, key_outcomes, next_actions, _ent_dicts, segments,
+    )
+
+    _placeholder_summary = {
+        "", "Summary generation failed — see extracted fields.",
+        "Transcript confidence too low for reliable analysis.",
+        "Call processed — see extracted fields.",
+    }
+    if call_summary.strip() in _placeholder_summary or len(call_summary.strip()) < 25:
+        call_summary = numeric_guard.fallback_summary({
+            "call_type": call_type,
+            "duration_seconds": audio_meta["original_duration"],
+            "financial_entities": _ent_dicts,
+            "compliance_checks": [c.model_dump() for c in compliance_checks],
+            "pii_count": len(pii_entities),
+            "overall_risk_level": risk_level.value,
+        })
+        logger.info(f"[{call_id}] Summary rebuilt from extracted data (model returned no usable text)")
+    _derived_totals = numeric_guard.compute_totals(_ent_dicts)
+    if _num_audit["removed_currency_claims"]:
+        logger.warning(
+            f"[{call_id}] Numeric guard removed {len(_num_audit['removed_currency_claims'])} "
+            f"invented currency claim(s): {_num_audit['removed_currency_claims'][:3]}"
+        )
+        degradations.report(
+            "summary_numerics",
+            f"model emitted {len(_num_audit['removed_currency_claims'])} unsupported currency "
+            f"conversion(s), removed in post-processing",
+            "call_summary/key_outcomes had fabricated figures stripped",
+            severity="info",
+        )
+    if _num_audit["unsupported_figures"]:
+        logger.warning(
+            f"[{call_id}] Figures in summary not traceable to the transcript: "
+            f"{_num_audit['unsupported_figures'][:6]}"
+        )
+
     # Use language detected earlier (line ~89)
     detected_language = detected_lang
 
@@ -674,7 +778,12 @@ def process_call(
         emotion_distribution=emotion_distribution,
         speaker_emotion_breakdown=speaker_emotion_breakdown,
         emotion_transitions=emotion_transitions,
-        pipeline_timings=stage_times,
+        escalation_moments=escalation_moments,
+        pipeline_timings={
+            **stage_times,
+            **{f"Stage 4/{k}": v for k, v in sorted(analyzer_times.items())},
+        },
+        degradations=degradations.snapshot(),
         detected_language=detected_language,
         has_code_switching=has_code_switching,
         language_distribution=lang_metadata.get("language_distribution", {}),
@@ -692,6 +801,8 @@ def process_call(
         key_outcomes=key_outcomes,
         next_actions=next_actions,
         financial_insights=financial_insights,
+        derived_totals=_derived_totals,
+        numeric_audit=_num_audit,
     )
 
     # Save output
@@ -700,6 +811,7 @@ def process_call(
     with open(output_path, "w") as f:
         json.dump(call_record.model_dump(), f, indent=2, default=str)
     logger.info(f"[{call_id}] Output saved to {output_path}")
+    call_index.upsert(call_record.model_dump(), output_path, output_dir)
     completed.append("5")
     _stage_timer("done")
 
@@ -707,20 +819,9 @@ def process_call(
     total_elapsed = time.perf_counter() - pipeline_start
     timing_str = " | ".join(f"{k}: {v}s" for k, v in stage_times.items())
     logger.info(f"[{call_id}] Pipeline complete in {total_elapsed:.0f}s — {timing_str}")
+    logger.info(f"[{call_id}] Analyzer status: {degradations.summary()}")
     _progress("done", "Complete", status="complete")
 
-    # Wait for WhisperX reload to finish (runs in background during Stage 5)
-    if _reload_future:
-        try:
-            _reload_future.result(timeout=180)
-            logger.info(f"[{call_id}] WhisperX reloaded — ready for next call")
-        except Exception as e:
-            logger.warning(f"[{call_id}] WhisperX reload failed: {e}")
-
-    # ── BACKBOARD: Audit trail + customer memory (non-blocking) ──
-    if backboard_configured():
-        logger.info(f"[{call_id}] Storing in Backboard audit trail")
-        store_call_record_sync(call_record.model_dump())
 
     return call_record
 
@@ -731,6 +832,79 @@ def _keyword_intent_fallback(text: str, call_type: str) -> tuple[CallIntent, flo
     Returns (intent, confidence). Much better than blind 'unknown' at 0.3.
     """
     lower = text.lower().strip()
+
+    # ── Collections / servicing intents ──
+    # Checked first, and only for regulated call types. Without this the fallback
+    # covered earnings-call vocabulary only and returned UNKNOWN for every
+    # utterance on a collections call — the product's primary call type, and the
+    # one the RBI compliance rules exist for. Measured at 0/14 before this block.
+    if call_type in ("collections", "kyc", "consent", "onboarding", "complaint"):
+        # Order matters: refusal and dispute share vocabulary with agreement.
+        if any(k in lower for k in (
+            "manager", "supervisor", "escalate", "senior person", "higher authority",
+            "complaint to", "ombudsman",
+        )):
+            return CallIntent.ESCALATION, 0.75
+
+        if any(k in lower for k in (
+            "not going to pay", "will not pay", "won't pay", "refuse", "cannot pay",
+            "can't pay", "no money", "not paying",
+        )):
+            return CallIntent.REFUSAL, 0.75
+
+        if any(k in lower for k in (
+            "do not accept", "don't accept", "not my", "wrong charge", "incorrect",
+            "dispute", "never took", "did not take", "completely wrong", "mistake",
+        )):
+            return CallIntent.DISPUTE, 0.72
+
+        if any(k in lower for k in (
+            "more time", "extension", "extend", "another week", "another two weeks",
+            "few more days", "postpone", "defer", "next month instead",
+        )):
+            return CallIntent.REQUEST_EXTENSION, 0.72
+
+        if any(k in lower for k in (
+            "i will pay", "i'll pay", "will transfer", "will deposit", "jama kar",
+            "pay by", "promise", "settle by", "clear it by", "make the payment by",
+        )):
+            return CallIntent.PAYMENT_PROMISE, 0.75
+
+        if any(k in lower for k in (
+            "i agree", "agreed", "that works", "acceptable", "okay with that",
+            "fine with me", "accept the settlement",
+        )):
+            return CallIntent.AGREEMENT, 0.72
+
+        if any(k in lower for k in (
+            "i consent", "you may", "you can share", "i authorise", "i authorize",
+            "go ahead and", "permission",
+        )):
+            return CallIntent.CONSENT_GIVEN, 0.70
+
+        if any(k in lower for k in (
+            "do not consent", "don't consent", "do not share", "no permission",
+            "stop calling", "do not call", "don't call",
+        )):
+            return CallIntent.CONSENT_DENIED, 0.72
+
+        if any(k in lower for k in (
+            "very poor service", "worst", "harassing", "harassment", "fed up",
+            "complain about", "unacceptable service",
+        )):
+            return CallIntent.COMPLAINT, 0.70
+
+        if any(k in lower for k in (
+            "good morning", "good afternoon", "good evening", "namaste", "hello",
+            "am i speaking with", "this is", "calling from",
+        )):
+            return CallIntent.GREETING, 0.70
+
+        if any(k in lower for k in (
+            "outstanding", "balance", "due on", "due date", "late fee", "penalty",
+            "emi of", "interest rate", "tenure", "amount is", "your account",
+        )):
+            return CallIntent.INFORMATION_REQUEST, 0.68
 
     # Procedural / call management
     procedural_kw = (
@@ -1203,10 +1377,14 @@ def _generate_summary(
         f"{lang_context}\n"
         f"TRANSCRIPT:\n{compressed}\n\n"
         f"Now write your analysis in EXACTLY this format:\n\n"
-        f"SUMMARY: Write a detailed 5-8 sentence financial summary. Cover: revenue and earnings figures, "
-        f"margin changes, capital expenditure, guidance or forecasts, strategic initiatives, "
-        f"regulatory matters, and management outlook. Cite specific dollar amounts, percentages, "
-        f"and time periods. Name the speakers and their roles.\n\n"
+        f"SUMMARY: Write a detailed 5-8 sentence financial summary. Cover: amounts and balances, "
+        f"guidance or forecasts, commitments made, regulatory matters, and outlook. "
+        f"Name the speakers and their roles.\n\n"
+        f"RULES ON NUMBERS — strict:\n"
+        f"- Quote every figure EXACTLY as the transcript states it, in its original currency.\n"
+        f"- Do NOT convert between currencies or add an approximate value in another currency.\n"
+        f"- Do NOT add, total or otherwise compute new numbers. Totals are calculated in code.\n"
+        f"- If a figure is not stated in the transcript, do not mention it.\n\n"
         f"OUTCOMES:\n"
         f"- [Key financial metric or result with exact numbers]\n"
         f"- [Important strategic decision or announcement]\n"
@@ -1610,12 +1788,16 @@ def _merge_entities(
 ) -> list[FinancialEntity]:
     """Merge Layer 1 (regex/spaCy) and Layer 2 (LLM) entities, deduplicating."""
     # Layer 1 has higher confidence for structured patterns
+    def _key(e):
+        return (e.entity_type, e.segment_id, (e.value or "").strip().lower())
+
     merged = list(layer1)
-    l1_keys = {(e.entity_type, e.segment_id) for e in layer1}
+    l1_keys = {_key(e) for e in layer1}
 
     for e in layer2:
-        if (e.entity_type, e.segment_id) not in l1_keys:
+        if _key(e) not in l1_keys:
             merged.append(e)
+            l1_keys.add(_key(e))
 
     return merged
 

@@ -76,7 +76,9 @@ def _build_currency_patterns(lang: str = "en") -> list[tuple]:
             if currency in ("INR_LAKH", "INR_CRORE", "INR_THOUSAND"):
                 patterns.append((rf"(\d+(?:\.\d+)?)\s*(?:{word_alt})", currency))
             else:
-                patterns.append((rf"(\d{{1,3}}(?:,\d{{2,3}})*)\s*(?:{word_alt})", currency))
+                # ASR mis-groups Indian digit separators — a real transcript produced
+                # "3,4,000" for 3,40,000 — so group sizes are 1-3, not 2-3.
+                patterns.append((rf"(\d{{1,3}}(?:,\d{{1,3}})*)\s*(?:{word_alt})", currency))
     # For non-English, also include English word patterns (code-switching)
     if lang != "en":
         for entry in get_currency_words("en"):
@@ -87,7 +89,7 @@ def _build_currency_patterns(lang: str = "en") -> list[tuple]:
                 if currency in ("INR_LAKH", "INR_CRORE", "INR_THOUSAND"):
                     patterns.append((rf"(\d+(?:\.\d+)?)\s*(?:{word_alt})", currency))
                 else:
-                    patterns.append((rf"(\d{{1,3}}(?:,\d{{2,3}})*)\s*(?:{word_alt})", currency))
+                    patterns.append((rf"(\d{{1,3}}(?:,\d{{1,3}})*)\s*(?:{word_alt})", currency))
     return patterns
 
 
@@ -247,6 +249,102 @@ def extract_entities_regex(segments: list, lang: str = "en") -> list[FinancialEn
     return unique
 
 
+# ── SPOKEN-NUMBER AMOUNTS ─────────────────────────────────────────────────────
+# Customers state amounts in words far more often than in digits: "ten thousand
+# rupees", "paanch hazaar rupaye". The regex layer only saw digits, so the
+# evaluation harness measured 0.75 recall on amounts with both misses being
+# word-form. Handled here for English and romanised Hindi/Tamil numerals.
+
+_WORD_UNITS = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+    "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+    "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17,
+    "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40,
+    "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
+    # Romanised Hindi
+    "ek": 1, "do": 2, "teen": 3, "char": 4, "chaar": 4, "paanch": 5, "panch": 5,
+    "chhe": 6, "che": 6, "saat": 7, "aath": 8, "nau": 9, "das": 10, "dus": 10,
+    "bees": 20, "pachees": 25, "tees": 30, "chalis": 40, "chaalis": 40,
+    "pachas": 50, "pachaas": 50, "saath": 60, "sattar": 70, "assi": 80, "nabbe": 90,
+    # Romanised Tamil
+    "onnu": 1, "rendu": 2, "moonu": 3, "naalu": 4, "anju": 5, "pathu": 10,
+    "irubadhu": 20, "aimbadhu": 50, "nooru": 100,
+}
+
+_WORD_SCALES = {
+    "hundred": 100, "sau": 100, "nooru": 100,
+    "thousand": 1_000, "hazaar": 1_000, "hazar": 1_000, "aayiram": 1_000,
+    "lakh": 100_000, "lac": 100_000, "lakhs": 100_000, "latcham": 100_000,
+    "crore": 10_000_000, "crores": 10_000_000, "kodi": 10_000_000,
+}
+
+_CURRENCY_MARKER = re.compile(
+    r"\b(rupees?|rupaye|rupaya|rupay|rs\.?|inr|rubaai|ரூபாய்|रुपये|रुपे|रुप्ये|रुपया)\b",
+    re.IGNORECASE,
+)
+
+_WORD_NUMBER_RE = re.compile(
+    r"\b((?:" + "|".join(sorted(list(_WORD_UNITS) + list(_WORD_SCALES), key=len, reverse=True))
+    + r")(?:[\s-]+(?:and[\s-]+)?(?:"
+    + "|".join(sorted(list(_WORD_UNITS) + list(_WORD_SCALES), key=len, reverse=True))
+    + r"))*)\b",
+    re.IGNORECASE,
+)
+
+
+def _words_to_number(phrase: str) -> float | None:
+    """Convert a spoken number phrase to a value. Returns None if not a number."""
+    total, current, seen = 0.0, 0.0, False
+    for token in re.split(r"[\s-]+", phrase.lower().strip()):
+        if token in ("and", ""):
+            continue
+        if token in _WORD_UNITS:
+            current += _WORD_UNITS[token]; seen = True
+        elif token in _WORD_SCALES:
+            scale = _WORD_SCALES[token]
+            current = (current or 1) * scale
+            if scale >= 1000:
+                total += current; current = 0.0
+            seen = True
+        else:
+            return None
+    if not seen:
+        return None
+    value = total + current
+    return value if value > 0 else None
+
+
+def extract_word_amounts(segments: list, lang: str = "en") -> list[FinancialEntity]:
+    """Amounts written as words, anchored to a nearby currency marker."""
+    out: list[FinancialEntity] = []
+    for seg in segments:
+        text = seg.get("text", "")
+        if not text or not _CURRENCY_MARKER.search(text):
+            continue
+        seg_id = seg.get("id", seg.get("segment_id", 0))
+        for m in _WORD_NUMBER_RE.finditer(text):
+            phrase = m.group(1)
+            # Require the currency marker within a short window after the number,
+            # so "twenty eighth" or "ten minutes" is not read as money.
+            tail = text[m.end():m.end() + 24]
+            if not _CURRENCY_MARKER.search(tail):
+                continue
+            value = _words_to_number(phrase)
+            if value is None or value < 10:
+                continue
+            out.append(FinancialEntity(
+                entity_type="payment_amount",
+                value=f"{value:.2f} INR",
+                raw_text=phrase.strip(),
+                segment_id=seg_id,
+                start_time=float(seg.get("start", 0)),
+                confidence=0.7,
+            ))
+    if out:
+        logger.info(f"Word-form amounts: {len(out)} extracted")
+    return out
+
+
 def extract_entities_spacy(segments: list) -> list[FinancialEntity]:
     """Extract named entities using spaCy NER (PERSON, ORG, MONEY, DATE, etc.)."""
     if not HAS_SPACY:
@@ -294,6 +392,9 @@ def _get_ner_pipeline():
         return _ner_pipeline, _ner_label_map
 
     if not HAS_FINETUNED_NER:
+        from pipeline.degradations import report
+        report("finetuned_ner", "no weights at data/models/financial-ner",
+               "entity extraction falls back to spaCy + regex only", severity="partial")
         return None, None
 
     try:
@@ -389,11 +490,14 @@ def extract_all_entities_layer1(segments: list, lang: str = "en") -> list[Financ
     For non-English text, skips English-only models (NER, spaCy).
     """
     regex_entities = extract_entities_regex(segments, lang=lang)
+    # Amounts spoken as words ("ten thousand rupees", "paanch hazaar rupaye").
+    # Language-agnostic: the word lists cover English plus romanised Hindi/Tamil.
+    word_entities = extract_word_amounts(segments, lang=lang)
     # Fine-tuned NER and spaCy are English-only — skip for non-English
     ner_entities = extract_entities_finetuned_ner(segments) if lang == "en" else []
     spacy_entities = extract_entities_spacy(segments) if lang == "en" else []
 
-    # Merge: regex wins, then NER, then spaCy on conflicts
+    # Merge: regex wins, then word-form amounts, then NER, then spaCy on conflicts
     seen_keys = set()
     merged = []
 
@@ -401,6 +505,12 @@ def extract_all_entities_layer1(segments: list, lang: str = "en") -> list[Financ
         key = (e.entity_type, e.segment_id)
         seen_keys.add(key)
         merged.append(e)
+
+    for e in word_entities:
+        key = (e.entity_type, e.segment_id)
+        if key not in seen_keys:
+            seen_keys.add(key)
+            merged.append(e)
 
     for e in ner_entities:
         key = (e.entity_type, e.segment_id)

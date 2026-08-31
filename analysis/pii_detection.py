@@ -65,12 +65,24 @@ def _build_aadhaar_recognizer() -> PatternRecognizer:
         patterns=[
             Pattern(
                 name="aadhaar_spaced",
-                regex=r"\b(\d{4}\s\d{4}\s\d{4})\b",
+                regex=r"(?<![\d+])([2-9]\d{3}\s\d{4}\s\d{4})(?!\d)",
                 score=0.7,
             ),
+            # Dictated digit-by-digit. Whisper renders a spoken Aadhaar this way
+            # far more often than as a clean 12-digit string, and the evaluation
+            # harness measured 0.50 recall on ASR-rendered identifiers before this.
+            Pattern(
+                name="aadhaar_dictated",
+                regex=r"(?<![\d+])([2-9](?:\s\d){11})(?!\s?\d)",
+                score=0.6,
+            ),
+            # A 12-digit run that is NOT part of a longer number and is not preceded
+            # by "+" — otherwise an E.164 Indian mobile (+91 + 10 digits) is exactly
+            # 12 digits and gets read as an Aadhaar. UIDAI also never issues a number
+            # starting with 0 or 1, so require a leading 2-9.
             Pattern(
                 name="aadhaar_continuous",
-                regex=r"\b(\d{12})\b",
+                regex=r"(?<![\d+])([2-9]\d{11})(?!\d)",
                 score=0.5,  # Lower score — needs context or checksum to confirm
             ),
         ],
@@ -88,6 +100,12 @@ def _build_pan_recognizer() -> PatternRecognizer:
                 name="pan_standard",
                 regex=r"\b[A-Z]{5}\d{4}[A-Z]\b",
                 score=0.85,
+            ),
+            # Dictated letter-by-letter / digit-by-digit, e.g. "A B C D E 1 2 3 4 F".
+            Pattern(
+                name="pan_dictated",
+                regex=r"(?<![A-Za-z0-9])((?:[A-Za-z]\s){5}(?:\d\s){4}[A-Za-z])(?![A-Za-z0-9])",
+                score=0.6,
             ),
         ],
         context=["pan", "permanent account", "tax", "income tax", "PAN card"],
@@ -121,10 +139,22 @@ def _build_upi_recognizer() -> PatternRecognizer:
         supported_entity="IN_UPI_ID",
         name="Indian UPI ID Recognizer",
         patterns=[
+            # Known handles — high confidence.
             Pattern(
-                name="upi_id",
-                regex=r"\b[\w.]+@(?:ybl|okhdfcbank|okicici|oksbi|paytm|apl|ibl|axl|upi|phonepe|gpay)\b",
+                name="upi_id_known_handle",
+                regex=r"\b[\w.-]+@(?:ybl|okhdfcbank|okicici|oksbi|okaxis|okbizaxis|paytm|"
+                      r"apl|ibl|axl|axisbank|upi|phonepe|gpay|hdfcbank|icici|sbi|yesbank|"
+                      r"kotak|federal|idfcbank|indus|barodampay|cnrb|airtel|freecharge|"
+                      r"abfspay|jupiteraxis|naviaxis|fam|slc|rapl|waaxis|waicici|wasbi)\b",
                 score=0.9,
+            ),
+            # Any handle of the right shape. The previous allowlist silently missed
+            # real VPAs (e.g. @okaxis), and new PSP handles appear regularly, so match
+            # the format and lean on Presidio's context words for confidence.
+            Pattern(
+                name="upi_id_generic",
+                regex=r"\b[\w.-]{2,64}@[a-z]{2,30}\b",
+                score=0.5,
             ),
         ],
         context=["upi", "payment", "pay", "transfer", "gpay", "phonepe", "paytm"],
@@ -278,7 +308,11 @@ def detect_pii(segments: list, score_threshold: float = 0.5, lang: str = "en") -
         "DATE_TIME": max(score_threshold, 0.7),
     }
 
-    for seg_idx, seg in enumerate(segments):
+    for _pos, seg in enumerate(segments):
+        # Prefer the segment's own id; fall back to position. Attributing PII to
+        # a positional index silently mislabels callers that pass filtered or
+        # re-indexed segments.
+        seg_idx = seg.get("segment_id", seg.get("id", _pos))
         text = seg.get("text", "")
         if not text.strip():
             continue
@@ -461,7 +495,11 @@ def _detect_multilingual_ner(segments: list, lang: str) -> list[PIIEntity]:
     person_labels = {"PER", "PERSON", "B-PER", "I-PER"}
     location_labels = {"LOC", "LOCATION", "B-LOC", "I-LOC", "GPE"}
 
-    for seg_idx, seg in enumerate(segments):
+    for _pos, seg in enumerate(segments):
+        # Prefer the segment's own id; fall back to position. Attributing PII to
+        # a positional index silently mislabels callers that pass filtered or
+        # re-indexed segments.
+        seg_idx = seg.get("segment_id", seg.get("id", _pos))
         text = seg.get("text", "").strip()
         if not text or len(text) < 3:
             continue

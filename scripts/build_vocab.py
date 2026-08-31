@@ -137,24 +137,44 @@ def _extract_trivials_from_skit(ds, vocab: dict):
     logger.info(f"skit-s2i: extracted {len(vocab['trivial_phrases'])} trivials, {len(vocab['greetings'])} greetings")
 
 
+# Banking77 is a banking-INTENT dataset: every utterance in it is a real intent,
+# so shortness alone does not make one trivial. Without this guard, phrases like
+# "block credit card" and "personal loan eligibility" were marked trivial and
+# skipped by classify_for_llm_routing() instead of being classified.
+_DOMAIN_TERMS = re.compile(
+    r"\b(balance|payment|pay|card|account|transfer|loan|refund|charge|pending|activate|"
+    r"cancel|dispute|withdraw|withdrawal|deposit|atm|pin|statement|cheque|check|emi|"
+    r"credit|debit|bank|beneficiary|transaction|limit|interest|fee|mortgage|invest|"
+    r"currency|exchange|top up|topup|verify|identity|passport|declined|blocked|block|"
+    r"expire|expired|delivery|tracking|eligibility|visa|salary|overdraft|insurance)\b"
+)
+
+
 def _extract_trivials_from_banking77(ds, vocab: dict):
-    """Extract common acknowledgment/greeting phrases from Banking77."""
+    """Extract genuine acknowledgment/greeting phrases from Banking77."""
     trivial_count = Counter()
 
     text_col = "text" if "text" in ds.column_names else ds.column_names[0]
 
     for row in ds:
         text = row.get(text_col, "").strip().lower()
-        words = text.split()
-        if len(words) <= 5:
-            clean = text.rstrip(".")
-            trivial_count[clean] += 1
+        clean = text.rstrip(".")
+        if len(clean.split()) > 4:
+            continue
+        if _DOMAIN_TERMS.search(clean):
+            continue
+        trivial_count[clean] += 1
 
+    added = 0
     for phrase, count in trivial_count.items():
-        if count >= 1:
+        if count >= 2:  # require repetition — one-off strings are usually noise
             vocab["trivial_phrases"].add(phrase)
+            added += 1
 
-    logger.info(f"banking77: extracted {len(trivial_count)} candidate trivials")
+    logger.info(
+        f"banking77: {added} trivials kept "
+        f"({len(trivial_count)} candidates after domain filtering)"
+    )
 
 
 def _extract_from_bitext(ds, vocab: dict):

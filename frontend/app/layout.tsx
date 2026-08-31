@@ -1,17 +1,23 @@
 import type { Metadata } from 'next';
-import { Playfair_Display, Inter } from 'next/font/google';
+import localFont from 'next/font/local';
 import './globals.css';
 
-const playfair = Playfair_Display({
-  subsets: ['latin'],
+// Fonts are vendored rather than fetched from Google at build time. `next/font/google`
+// downloads during the build, so a slow or offline network fails the build outright —
+// which is exactly the situation you are in when rebuilding on conference wifi before
+// a demo. These are the same variable fonts, self-hosted.
+const playfair = localFont({
+  src: './fonts/PlayfairDisplay-Variable.woff2',
   variable: '--font-display',
-  weight: ['400', '500', '600', '700'],
+  weight: '400 700',
+  display: 'swap',
 });
 
-const inter = Inter({
-  subsets: ['latin'],
+const inter = localFont({
+  src: './fonts/Inter-Variable.woff2',
   variable: '--font-body',
-  weight: ['300', '400', '500', '600', '700'],
+  weight: '300 700',
+  display: 'swap',
 });
 
 export const metadata: Metadata = {

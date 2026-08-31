@@ -37,6 +37,7 @@ data/models/
 data/raw_audio/
 data/transcripts/
 data/processed/
+data/**/index.sqlite3
 data/datasets/
 data/exports/
 data/judge_dataset/
@@ -62,11 +63,15 @@ finsight-v2-pivot.md
 # Frontend build artifacts
 frontend/node_modules/
 frontend/.next/
+frontend/*.tsbuildinfo
 frontend/out/
 frontend/.DS_Store
 frontend/.claude/
 frontend/.idea/
 frontend/.pytest_cache/
+
+# Evaluation output
+eval_results.json
 
 # Logs
 *.log

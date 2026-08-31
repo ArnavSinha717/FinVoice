@@ -190,11 +190,12 @@ function formatTimestamp(seconds: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+// review_priority: 1 = urgent ... 5 = routine (see config/schemas.py CallRecord)
 function deriveStatus(data: Record<string, unknown>): Call['status'] {
   if (!data.requires_human_review) return 'reviewed';
-  const priority = (data.review_priority as number) ?? 0;
-  if (priority >= 7) return 'escalated';
-  if (priority >= 4) return 'flagged';
+  const priority = (data.review_priority as number) ?? 5;
+  if (priority <= 1) return 'escalated';
+  if (priority <= 3) return 'flagged';
   return 'pending';
 }
 
@@ -203,6 +204,14 @@ function normalizeSpeaker(raw: string): string {
   if (lower.includes('agent') || lower === 'speaker_00') return 'agent';
   if (lower.includes('customer') || lower === 'speaker_01') return 'customer';
   return lower || 'other';
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 function prettifyCheckName(name: string): string {
@@ -225,7 +234,7 @@ export const PIPELINE_STAGES: PipelineStage[] = [
   { id: 2, name: 'Transcription', color: 'var(--s2)', tools: ['WhisperX', 'pyannote'], desc: 'Financial transcription with speaker diarization', outputs: ['Time-aligned transcript', 'Speaker labels', 'Confidence scores'] },
   { id: 3, name: 'NLU & Extraction', color: 'var(--s3)', tools: ['FinBERT', 'spaCy', 'Qwen3 8B'], desc: 'Entity extraction, intent classification, sentiment analysis', outputs: ['Entities JSON', 'Intent labels', 'Sentiment scores'] },
   { id: 4, name: 'Compliance & Fraud', color: 'var(--s4)', tools: ['Rule Engine', 'emotion2vec', 'Parselmouth'], desc: 'Regulatory compliance, fraud detection, tamper analysis', outputs: ['Compliance scorecard', 'Fraud signals', 'Tamper risk'] },
-  { id: 5, name: 'Output & Storage', color: 'var(--s5)', tools: ['Backboard.io', 'Export API'], desc: 'Structured data export, audit trails, knowledge base', outputs: ['CallRecord JSON', 'Training datasets', 'Audit logs'] },
+  { id: 5, name: 'Output & Storage', color: 'var(--s5)', tools: ['Pydantic', 'PyArrow', 'Export API'], desc: 'Structured data export, audit trails, ML-trainable datasets', outputs: ['CallRecord JSON', 'Training datasets', 'Audit logs'] },
 ];
 
 // ===== API FUNCTIONS =====
@@ -331,15 +340,15 @@ export async function getTranscript(callId: string): Promise<TranscriptMessage[]
 
     return segments.map((seg: Record<string, unknown>) => {
       const speaker = normalizeSpeaker(seg.speaker as string);
-      let text = (seg.text as string) || '';
+      let text = escapeHtml((seg.text as string) || '');
 
       // Inject entity markup for matching entities in this segment
       const segId = seg.segment_id ?? segments.indexOf(seg);
       const segEntities = entities.filter(e => e.segment_id === segId);
       for (const ent of segEntities) {
-        const raw = (ent.raw_text as string) || '';
+        const raw = escapeHtml((ent.raw_text as string) || '');
         if (raw && text.includes(raw)) {
-          const etype = (ent.entity_type as string) || 'entity';
+          const etype = escapeHtml((ent.entity_type as string) || 'entity');
           text = text.replace(raw, `<entity type="${etype}">${raw}</entity>`);
         }
       }
@@ -491,7 +500,7 @@ export async function getReviewQueue(): Promise<ReviewItem[]> {
     const data = await res.json();
     return (data.items || []).map((item: Record<string, unknown>) => ({
       id: (item.call_id as string) || '',
-      priority: (item.review_priority as number) || 0,
+      priority: (item.review_priority as number) ?? 5,
       riskType: ((item.overall_risk_level as string) || 'low').charAt(0).toUpperCase() + ((item.overall_risk_level as string) || 'low').slice(1),
       summary: (item.call_summary as string) || '',
       flags: (item.review_reasons as string[]) || [],
@@ -720,23 +729,28 @@ export async function downloadMaskedTranscript(callId: string): Promise<boolean>
   }
 }
 
-// ===== BACKBOARD.IO API =====
+// ===== SYSTEM HEALTH =====
 
-export interface BackboardStatus {
-  configured: boolean;
-  assistant_id: string | null;
-  calls_stored: number;
+export interface HealthStatus {
+  status: string;
+  gpu: { device?: string; vram_total_mb?: number; vram_allocated_mb?: number };
+  ollama: { status: string; models?: string[]; detail?: string };
+  whisperx_loaded: boolean;
 }
 
-export async function getBackboardStatus(): Promise<BackboardStatus> {
+export async function getHealth(): Promise<HealthStatus | null> {
   try {
-    const res = await fetch(`${API_BASE}/backboard/status`);
-    if (!res.ok) return { configured: false, assistant_id: null, calls_stored: 0 };
+    const res = await fetch(`${API_BASE}/health`);
+    if (!res.ok) return null;
     return await res.json();
   } catch {
-    return { configured: false, assistant_id: null, calls_stored: 0 };
+    return null;
   }
 }
+
+// ===== AI ANALYST =====
+// Answered by the local LLM over locally processed records — no call data leaves
+// the machine.
 
 export async function queryAuditTrail(question: string, callId?: string): Promise<{ answer: string; error?: string }> {
   try {
@@ -746,24 +760,6 @@ export async function queryAuditTrail(question: string, callId?: string): Promis
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      return { answer: '', error: err };
-    }
-    const data = await res.json();
-    return { answer: data.answer || data.response || JSON.stringify(data) };
-  } catch (e) {
-    return { answer: '', error: String(e) };
-  }
-}
-
-export async function queryCustomerHistory(customerId: string, question: string): Promise<{ answer: string; error?: string }> {
-  try {
-    const res = await fetch(`${API_BASE}/customers/${customerId}/query`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question }),
     });
     if (!res.ok) {
       const err = await res.text();
@@ -791,18 +787,5 @@ export async function complianceReason(excerpt: string, context: string, regulat
     return { reasoning: data.reasoning || data.response || JSON.stringify(data) };
   } catch (e) {
     return { reasoning: '', error: String(e) };
-  }
-}
-
-export async function linkCustomer(callId: string, customerId: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${API_BASE}/customers/${customerId}/link`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ call_id: callId }),
-    });
-    return res.ok;
-  } catch {
-    return false;
   }
 }

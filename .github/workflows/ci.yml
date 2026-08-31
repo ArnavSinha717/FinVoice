@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  frontend:
+    name: Frontend build + typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Build
+        run: npx next build
+
+  backend:
+    name: Backend syntax + schema
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The full requirements pull ~8 GB of CUDA wheels, which is impractical on a
+      # CI runner. Compile-check everything, then exercise the pure-Python layers
+      # (schemas, compliance rules, vocab loading) against their real dependencies.
+      - name: Compile all modules
+        run: python -m compileall -q app.py analysis pipeline services config tests scripts
+
+      - name: Install lightweight deps
+        run: pip install pydantic loguru langdetect pytest
+
+      - name: Schema and compliance checks
+        run: |
+          python - <<'PY'
+          from config.schemas import CallRecord, ComplianceCheck, RiskLevel
+          from analysis.compliance import check_dpdp_compliance
+
+          # DPDP: a call that collects an identifier with no purpose/consent notice
+          bad = [{"speaker": "agent", "text": "Give me your Aadhaar number and date of birth."}]
+          names = {c.check_name: c.passed for c in check_dpdp_compliance(bad, "collections")}
+          assert names.get("dpdp_purpose_notice") is False, names
+          assert names.get("dpdp_consent_obtained") is False, names
+
+          # A properly conducted KYC call passes
+          good = [{"speaker": "agent", "text":
+                   "To verify your identity for the purpose of KYC, do I have your consent "
+                   "to collect your PAN number? You may withdraw your consent at any time."}]
+          assert all(c.passed for c in check_dpdp_compliance(good, "kyc"))
+
+          # Non-regulated calls are out of scope for DPDP processing checks
+          assert check_dpdp_compliance(bad, "general") == []
+
+          # review_priority contract the dashboard depends on: 1 = urgent, 5 = routine
+          field = CallRecord.model_fields["review_priority"]
+          bounds = {type(m).__name__: getattr(m, "ge", getattr(m, "le", None)) for m in field.metadata}
+          assert bounds.get("Ge") == 1 and bounds.get("Le") == 5, bounds
+          print("backend checks passed")
+          PY
